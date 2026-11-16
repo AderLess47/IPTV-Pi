@@ -1,0 +1,23 @@
+# IPTV-Pi fstab
+#
+# - rootfs is mounted with noatime so Kodi/iptv activity does not dirty the
+#   SD card with access-time updates on every read;
+# - /boot is the FAT boot partition: the firmware reads cmdline.txt from it and
+#   the RAUC boot script rewrites that file when it switches slots. It is
+#   mounted read-only, because an interrupted FAT write on a power cut can
+#   cost the whole bootloader; the few writers (iptv-boot-slot,
+#   iptv-rauc-mark-good, iptv-wifi-import) remount it read-write for the write,
+#   call sync and switch it back;
+# - /var/lib/iptv is its own partition (LABEL=iptv-data). Playlists, state,
+#   logs, web-UI updates and the Kodi profile live there, so a rootfs swap
+#   keeps all of it. It is mounted by label because RAUC only ever writes the
+#   rootfs slots;
+# - /tmp and /var/log live in RAM: nothing the appliance writes there should
+#   cost SD card write cycles or survive a power cut.
+
+# <device>                       <mount>        <type>  <options>                             <dump> <pass>
+/dev/root                       /              ext4    noatime,errors=remount-ro             0      1
+/dev/mmcblk0p1                  /boot          vfat    ro,noatime,nofail                     0      2
+LABEL=iptv-data                 /var/lib/iptv  ext4    noatime,errors=remount-ro             0      2
+tmpfs                           /tmp           tmpfs   mode=1777,nosuid,nodev,noatime,size=32M 0     0
+tmpfs                           /var/log       tmpfs   mode=0755,nosuid,nodev,noatime,size=16M 0     0

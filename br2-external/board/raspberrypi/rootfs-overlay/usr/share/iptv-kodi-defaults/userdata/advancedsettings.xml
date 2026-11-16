@@ -1,0 +1,50 @@
+<advancedsettings version="1.0">
+    <!-- IPTV-Pi: minimal-footprint IPTV appliance tuning (Kodi 18 / Leia).
+         Read once at startup: restart Kodi after editing. -->
+
+    <!-- No splash video/logo: the box boots straight into the channel list. -->
+    <splash>false</splash>
+
+    <!-- 0 = log errors only (-1 would be silent). hide="true" keeps the
+         on-screen debug toggle from overriding this. -->
+    <loglevel hide="true">0</loglevel>
+
+    <!-- GUI rendering. Dirty regions make Kodi redraw only what changed
+         instead of pushing a full 60 fps frame with a static menu:
+           algorithmdirtyregions 3 = whole-screen render only if something
+                                     changed (the safe mode for ARM GPUs;
+                                     2 can flicker on VideoCore)
+           nofliptimeout 0         = never schedule an extra flip when nothing
+                                     moved, so an idle menu really is idle
+           smartredraw true        = skip the GUI process/render call entirely
+                                     while a video plays (Kodi 18 feature) -->
+    <gui>
+        <algorithmdirtyregions>3</algorithmdirtyregions>
+        <nofliptimeout>0</nofliptimeout>
+        <smartredraw>true</smartredraw>
+    </gui>
+
+    <!-- Stream cache for IPTV: buffer all filesystems (including the local
+         playlist's HTTP/HLS sources), 20 MB in RAM, read ahead at 4x the
+         average bitrate. Kodi wants roughly 3x this value as free memory, so
+         20 MB is the practical ceiling on a 256 MB board. Lower it (or use
+         0 to cache on the SD card) if dmesg shows the OOM killer. -->
+    <cache>
+        <buffermode>1</buffermode>
+        <memorysize>20971520</memorysize>
+        <readfactor>4.0</readfactor>
+    </cache>
+
+    <!-- NOTE on the GUI resolution: Kodi has no <guires> tag in
+         advancedsettings.xml (that name comes from streamer boxes, not from
+         Kodi). The supported way to render the GUI at 720p while keeping
+         1080p video untouched is Kodi's own setting:
+             Settings -> System -> Display -> Resolution -> 1280x720
+         which is stored in guisettings.xml and only changes the UI size.
+         On a 256 MB Pi the Raspberry Pi platform already defaults to a
+         reduced GUI resolution. -->
+
+    <!-- Thumbnail/metadata extraction for streams is switched off in
+         guisettings.xml (myvideos.extractflags / extractchapterthumbs):
+         Kodi has no advancedsettings key for it. -->
+</advancedsettings>

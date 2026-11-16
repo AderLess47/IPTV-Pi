@@ -1,0 +1,126 @@
+# IPTV-Pi :: Raspberry Pi 2 (BCM2836, Cortex-A7, ARMv7)
+#
+# Minimal Kodi IPTV appliance: Linux + systemd + ALSA + VideoCore MMAL
+# hardware H.264 decode + Kodi (rbpi platform) + Flask playlist UI.
+# No X11, no Wayland, no desktop.
+#
+# Build with:
+#   ./build_os.sh --board pi2      (or: make BR2_EXTERNAL=$PWD/br2-external \
+#                                   O=output/pi2 iptvpi2_defconfig)
+
+# --- Architecture: ARMv7-A with NEON + VFPv4, hard float -------------------
+BR2_arm=y
+BR2_cortex_a7=y
+BR2_ARM_EABIHF=y
+BR2_ARM_FPU_NEON_VFPV4=y
+
+# --- Toolchain: glibc + C++ -----------------------------------------------
+BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+
+# --- Kernel: Raspberry Pi Foundation fork (5.10), bcm2709 defconfig --------
+BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_5_10=y
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_TARBALL=y
+BR2_LINUX_KERNEL_CUSTOM_TARBALL_LOCATION="$(call github,raspberrypi,linux,967d45b29ca2902f031b867809d72e3b3d623e7a)/linux-967d45b29ca2902f031b867809d72e3b3d623e7a.tar.gz"
+BR2_LINUX_KERNEL_DEFCONFIG="bcm2709"
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="bcm2709-rpi-2-b"
+BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
+# cpufreq/ondemand + thermal sensor for the dynamic clocking and telemetry.
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_IPTVPI_PATH)/board/raspberrypi/kernel-iptv.fragment"
+
+# --- Boot firmware --------------------------------------------------------
+BR2_PACKAGE_RPI_FIRMWARE=y
+BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI=y
+BR2_PACKAGE_RPI_FIRMWARE_DEFAULT=y
+# BR2_PACKAGE_RPI_FIRMWARE_INSTALL_DTB_OVERLAYS is not set
+
+# --- Init system ----------------------------------------------------------
+BR2_INIT_SYSTEMD=y
+BR2_PACKAGE_SYSTEMD_NETWORKD=y
+BR2_PACKAGE_SYSTEMD_RESOLVED=y
+BR2_PACKAGE_SYSTEMD_TIMESYNCD=y
+BR2_TARGET_GENERIC_HOSTNAME="iptvpi"
+BR2_TARGET_GENERIC_ISSUE="IPTV-Pi :: Kodi IPTV appliance"
+BR2_TARGET_GENERIC_GETTY_PORT="ttyAMA0"
+BR2_TARGET_GENERIC_GETTY_BAUDRATE_115200=y
+BR2_TARGET_GENERIC_ROOT_PASSWD=""
+BR2_TARGET_LOCALTIME="UTC"
+
+# --- Kodi with the native Raspberry Pi platform ---------------------------
+# Kodi 18 embeds Python 2.7; BR2_PACKAGE_KODI depends on BR2_PACKAGE_PYTHON
+# (it does not select it), so it has to be enabled explicitly.
+BR2_PACKAGE_RPI_USERLAND=y
+BR2_PACKAGE_PYTHON=y
+# Kodi refuses a .pyc-only Python build, so keep the sources as well.
+BR2_PACKAGE_PYTHON_PY_PYC=y
+BR2_PACKAGE_KODI=y
+BR2_PACKAGE_KODI_PLATFORM_RBPI=y
+BR2_PACKAGE_KODI_ALSA_LIB=y
+BR2_PACKAGE_KODI_PVR_IPTVSIMPLE=y
+# HDMI-CEC: the TV remote controls Kodi over the HDMI cable. libcec uses
+# the VideoCore CEC service (rpi-userland) on the Pi 1/2.
+BR2_PACKAGE_LIBCEC=y
+BR2_PACKAGE_KODI_LIBCEC=y
+# HTTPS playlists/EPG and HLS (.m3u8) IPTV streams.
+BR2_PACKAGE_OPENSSL=y
+BR2_PACKAGE_KODI_INPUTSTREAM_ADAPTIVE=y
+
+# --- Audio ----------------------------------------------------------------
+BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_ALSA_UTILS_ALSAMIXER=y
+BR2_PACKAGE_ALSA_UTILS_AMIXER=y
+BR2_PACKAGE_ALSA_UTILS_APLAY=y
+BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
+
+# --- Networking (LAN + WLAN) ----------------------------------------------
+BR2_PACKAGE_WPA_SUPPLICANT=y
+BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y
+# Buildroot 2021.02 has no wpa_supplicant control interface option (and
+# builds it without the ctrl interface), so Wi-Fi is configured statically:
+# edit wpa_supplicant-wlan0.conf and restart the unit.
+BR2_PACKAGE_IW=y
+BR2_PACKAGE_WIRELESS_REGDB=y
+BR2_PACKAGE_LINUX_FIRMWARE=y
+BR2_PACKAGE_LINUX_FIRMWARE_BRCM_BCM43XXX=y
+BR2_PACKAGE_CA_CERTIFICATES=y
+BR2_PACKAGE_KMOD=y
+BR2_PACKAGE_DROPBEAR=y
+
+# --- Playlist web interface (Flask on port 80) ----------------------------
+# Buildroot 2021.02 builds one Python per image and Kodi 18 forces Python 2,
+# so Flask is installed for Python 2.7. webui/app.py and launch.sh handle
+# that transparently (the code is 2.7/3.x compatible).
+BR2_PACKAGE_PYTHON_FLASK=y
+
+# --- A/B system updates (RAUC) -------------------------------------------
+# RAUC 1.5.1 from Buildroot 2021.02, with its custom bootloader backend: the
+# Pi firmware boots from the FAT partition and iptv-boot-slot rewrites
+# cmdline.txt. Network support lets `rauc install https://...` pull bundles.
+# The 1024M rootfs needs two equal slots, see post-image.sh.
+BR2_PACKAGE_RAUC=y
+BR2_PACKAGE_RAUC_NETWORK=y
+# The host tool signs the bundle in post-image.sh; without this symbol no
+# rauc binary lands in host/bin and the bundle step is skipped.
+BR2_PACKAGE_HOST_RAUC=y
+
+# --- Misc -----------------------------------------------------------------
+BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y
+
+# --- Root filesystem ------------------------------------------------------
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
+BR2_TARGET_ROOTFS_EXT2_LABEL="rootfs"
+# BR2_TARGET_ROOTFS_TAR is not set
+
+# --- SD card image --------------------------------------------------------
+BR2_PACKAGE_HOST_DOSFSTOOLS=y
+BR2_PACKAGE_HOST_GENIMAGE=y
+BR2_PACKAGE_HOST_MTOOLS=y
+
+# --- IPTV-Pi board files --------------------------------------------------
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_IPTVPI_PATH)/board/raspberrypi/rootfs-overlay"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_IPTVPI_PATH)/board/raspberrypi/post-build.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_IPTVPI_PATH)/board/raspberrypi/post-image.sh"

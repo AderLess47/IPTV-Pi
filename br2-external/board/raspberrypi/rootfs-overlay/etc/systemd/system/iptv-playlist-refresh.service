@@ -1,0 +1,28 @@
+[Unit]
+Description=IPTV-Pi scheduled playlist refresh
+Documentation=file:/usr/share/iptv-webui/app.py
+# Needs the network (the playlist lives on the provider's server) and Kodi for
+# the JSON-RPC reload. Both are already up long before the first run.
+After=network-online.target iptv-webui.service kodi.service iptv-data-init.service
+Wants=network-online.target
+RequiresMountsFor=/var/lib/iptv
+
+[Service]
+Type=oneshot
+# No-op (exit 0) when the web UI has never been given a playlist URL, so the
+# timer can stay enabled on a box that is fed playlists by hand.
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONOPTIMIZE=2
+Environment=IPTV_PLAYLIST=/var/lib/iptv/playlist.m3u
+Environment=IPTV_KODI_UNIT=kodi.service
+# Give a slow provider a little more time than the interactive path.
+Environment=IPTV_FETCH_TIMEOUT=120
+ExecStart=/usr/share/iptv-webui/launch.sh --refresh
+# Housekeeping only: this must never compete with playback.
+Nice=19
+IOSchedulingClass=idle
+MemoryAccounting=yes
+MemoryMax=96M
+# A provider that hangs must not leave the unit stuck forever.
+TimeoutStartSec=15min

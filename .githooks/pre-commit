@@ -1,0 +1,24 @@
+#!/bin/sh
+# Refuse to commit anything that does not pass the local checks.
+#
+# Enable once per clone:   git config --local core.hooksPath .githooks
+# Deliberate bypass:       git commit --no-verify
+#
+# The checks run on the working tree, not on the index, so commit whole files
+# (git add -p and then committing a single hunk means the rest was checked too).
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+if [ -n "$IPTV_SKIP_CHECKS" ]; then
+	echo "pre-commit: checks skipped because IPTV_SKIP_CHECKS is set" >&2
+	exit 0
+fi
+
+# Without docker and without a python2.7 the 2.7 job cannot run; the script
+# then says so and keeps going instead of blocking every commit on a missing
+# runtime. CI does not set this and still fails hard in that case.
+IPTV_ALLOW_SKIP=1
+export IPTV_ALLOW_SKIP
+
+exec sh tests/run-checks.sh

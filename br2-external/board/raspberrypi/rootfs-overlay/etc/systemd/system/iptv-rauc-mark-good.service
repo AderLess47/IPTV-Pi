@@ -1,0 +1,23 @@
+[Unit]
+Description=IPTV-Pi: mark the running RAUC slot good
+Documentation=file:/usr/share/iptv-webui/app.py
+# Only a boot that reached a working UI counts as good, so a broken slot is
+# reported as such by `rauc status` and can be rolled back with mark-bad.
+After=iptv-webui.service kodi.service local-fs.target iptv-data-init.service
+Wants=iptv-webui.service
+RequiresMountsFor=/var/lib/iptv
+ConditionPathExists=/usr/bin/rauc
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# The helper opens a read-write window on /boot for the few bytes RAUC writes
+# through iptv-boot-slot, syncs and remounts it read-only again.
+# "already marked as good" exits non-zero, which is not a failure here.
+ExecStart=-/usr/bin/iptv-rauc-mark-good
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=2min
+
+[Install]
+WantedBy=multi-user.target

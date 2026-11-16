@@ -1,0 +1,4 @@
+# IPTV-Pi br2-external tree
+#
+# This tree only provides defconfigs (configs/) and board files
+# (board/raspberrypi/). It does not add any menu entries.

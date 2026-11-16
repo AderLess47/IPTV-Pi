@@ -1,0 +1,15 @@
+[Unit]
+Description=zram compressed swap (low-RAM tuning)
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=sysinit.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/iptv-zram-setup
+ExecStop=/usr/sbin/swapoff /dev/zram0
+
+[Install]
+WantedBy=sysinit.target

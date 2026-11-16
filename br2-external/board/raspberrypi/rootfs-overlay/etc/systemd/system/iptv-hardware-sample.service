@@ -1,0 +1,20 @@
+[Unit]
+Description=IPTV-Pi hardware log sample
+Documentation=file:/usr/share/iptv-webui/app.py
+
+[Service]
+Type=oneshot
+RequiresMountsFor=/var/lib/iptv
+# One line into /var/lib/iptv/log/hardware.log: temperatures, clocks, memory,
+# swap, load and uptime. Nothing here touches Kodi or the playlist.
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONOPTIMIZE=2
+Environment=IPTV_PLAYLIST=/var/lib/iptv/playlist.m3u
+ExecStart=/usr/share/iptv-webui/launch.sh --sample
+# Pure bookkeeping: never let it compete with playback.
+Nice=19
+IOSchedulingClass=idle
+MemoryAccounting=yes
+MemoryMax=32M
+TimeoutStartSec=2min

@@ -1,0 +1,38 @@
+#!/bin/sh
+#
+# IPTV-Pi: enable a zram compressed swap device.
+#
+# Kodi on a 256 MB board needs headroom; swapping into lz4-compressed RAM is
+# far faster than swapping to the SD card (and does not wear it out).
+# Size = 50% of RAM, clamped between 64 MiB and 512 MiB.
+
+set -u
+
+modprobe zram num_devices=1 2>/dev/null || true
+if [ ! -e /sys/block/zram0/disksize ]; then
+	modprobe zram 2>/dev/null || true
+fi
+if [ ! -e /sys/block/zram0/disksize ]; then
+	echo "iptv-zram: zram module not available, skipping" >&2
+	exit 0
+fi
+
+if grep -q '^/dev/zram0 ' /proc/swaps 2>/dev/null; then
+	exit 0
+fi
+
+echo lz4 > /sys/block/zram0/comp_algorithm 2>/dev/null || true
+
+mem_kb=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+size_kb=$(( mem_kb / 2 ))
+[ "$size_kb" -lt 65536 ] && size_kb=65536
+[ "$size_kb" -gt 524288 ] && size_kb=524288
+
+echo $(( size_kb * 1024 )) > /sys/block/zram0/disksize || exit 0
+mkswap /dev/zram0 >/dev/null 2>&1 || exit 0
+swapon -p 100 /dev/zram0 || exit 0
+
+# Prefer compressed RAM over the SD card.
+echo 100 > /proc/sys/vm/swappiness
+
+logger -t iptv-zram "zram swap enabled (${size_kb} KiB, lz4)" 2>/dev/null || true

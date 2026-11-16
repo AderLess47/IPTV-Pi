@@ -1,0 +1,26 @@
+# IPTV-Pi kernel configuration fragment (applied on top of bcmrpi/bcm2709)
+#
+# The Raspberry Pi defconfigs from the Foundation kernel already carry the
+# VideoCore, MMAL, ALSA, brcmfmac and USB bits. What they do not guarantee is
+# a kernel with CPU frequency scaling and the ondemand governor compiled in,
+# which iptv-cpufreq.service selects at boot.
+
+CONFIG_CPU_FREQ=y
+CONFIG_CPU_FREQ_GOV_ONDEMAND=y
+CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND=y
+CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
+
+# Hardware monitoring for the on-die sensor exposed as
+# /sys/class/thermal/thermal_zone0/temp (read by the web UI).
+CONFIG_THERMAL=y
+CONFIG_THERMAL_OF=y
+CONFIG_CPU_THERMAL=y
+CONFIG_BCM2835_THERMAL=y
+
+# Hardware watchdog. systemd opens /dev/watchdog and feeds it every
+# RuntimeWatchdogSec (15 s, /etc/systemd/system.conf); a frozen kernel or a
+# stuck Kodi then resets the board instead of hanging until someone pulls the
+# power. Built in, not a module, so it is there before any module is loaded.
+CONFIG_WATCHDOG=y
+CONFIG_WATCHDOG_CORE=y
+CONFIG_BCM2835_WDT=y

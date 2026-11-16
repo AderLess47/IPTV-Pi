@@ -1,0 +1,46 @@
+#!/bin/sh
+#
+# IPTV-Pi: first-boot setup of the data partition.
+#
+# /var/lib/iptv is its own partition, so playlists, state, logs, web-UI updates
+# and the Kodi profile survive a rootfs swap. The defaults shipped in the
+# rootfs (/usr/share/iptv-kodi-defaults) are copied there exactly once; the
+# marker /var/kodi/.seeded records that.
+#
+set -eu
+
+DATA_DIR="${IPTV_DIR:-/var/lib/iptv}"
+KODI_DIR="${IPTV_KODI_DIR:-/var/kodi}"
+DEFAULTS_DIR="${IPTV_KODI_DEFAULTS:-/usr/share/iptv-kodi-defaults}"
+
+die() {
+    printf 'iptv-data-init: %s\n' "$*" >&2
+    exit 1
+}
+
+[ -d "$DATA_DIR" ] || die "$DATA_DIR is missing"
+
+# Never seed into the rootfs: if the data partition did not mount, the files
+# would silently live in the slot that is about to be replaced. Tests set
+# IPTV_DATA_INIT_ASSUME_MOUNTED=1 because they use plain directories.
+if [ "${IPTV_DATA_INIT_ASSUME_MOUNTED:-0}" != "1" ]; then
+    if command -v mountpoint >/dev/null 2>&1; then
+        mountpoint -q "$DATA_DIR" || die "$DATA_DIR is not a mountpoint, refusing to seed"
+    fi
+fi
+
+mkdir -p "${DATA_DIR}/log"
+
+if [ -d "$KODI_DIR" ] && [ ! -e "${KODI_DIR}/.seeded" ]; then
+    if [ -d "$DEFAULTS_DIR" ]; then
+        cp -a "${DEFAULTS_DIR}/." "${KODI_DIR}/"
+    fi
+    printf 'seeded at %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${KODI_DIR}/.seeded"
+    printf 'iptv-data-init: seeded %s from %s\n' "$KODI_DIR" "$DEFAULTS_DIR"
+fi
+
+mkdir -p "${KODI_DIR}/userdata/addon_data/pvr.iptvsimple"
+
+if [ ! -s "${DATA_DIR}/playlist.m3u" ]; then
+    printf '#EXTM3U\n' > "${DATA_DIR}/playlist.m3u"
+fi

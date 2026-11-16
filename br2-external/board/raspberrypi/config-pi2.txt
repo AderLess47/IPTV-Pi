@@ -1,0 +1,44 @@
+# IPTV-Pi :: Raspberry Pi 2 (BCM2836, ARMv7)
+#
+# Installed as /boot/config.txt by post-image.sh. The base DTB that carries
+# the dtparam targets is staged alongside this file by the same hook.
+
+start_file=start.elf
+fixup_file=fixup.dat
+kernel=zImage
+
+# --- Display ---------------------------------------------------------------
+disable_overscan=1
+hdmi_force_hotplug=1
+hdmi_drive=2
+avoid_warnings=1
+boot_delay=0
+
+# --- VideoCore memory ------------------------------------------------------
+# The Pi 2 has 1 GB, so give the GPU enough for 1080p H.264 decode plus
+# Kodi's textures.
+gpu_mem_256=128
+gpu_mem_512=192
+gpu_mem_1024=256
+
+# --- Dynamic CPU scaling (DVFS) -------------------------------------------
+# force_turbo=0 keeps the firmware's dynamic voltage/frequency scaling alive:
+# the Cortex-A7 idles at 600 MHz and ramps to 900 MHz under load.
+force_turbo=0
+arm_freq=900
+arm_freq_min=600
+over_voltage=2
+
+# --- Dynamic H.264 decoder scaling ----------------------------------------
+h264_freq=400
+h264_freq_min=250
+
+# --- SD card interface clock ----------------------------------------------
+# Applied by start.elf to the sdhost node of the staged base DTB.
+dtparam=sd_overclock=80
+
+# --- Audio -----------------------------------------------------------------
+dtparam=audio=on
+
+# NOTE: Kodi uses the legacy VideoCore display stack (dispmanx + MMAL).
+# Do not add dtoverlay=vc4-kms-v3d.

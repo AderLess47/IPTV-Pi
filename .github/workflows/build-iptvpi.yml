@@ -1,0 +1,132 @@
+# IPTV-Pi: continuous integration and image building.
+#
+#   verify       every push / pull request, Python 3
+#   verify-py27  every push / pull request, real Python 2.7 (Kodi 18 in the
+#                image ships 2.7, so the web UI has to keep working there)
+#   build-images manual run or a v* tag, one job per board: Buildroot image,
+#                RAUC bundle and its checksum as downloadable artifacts
+name: IPTV-Pi
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (Python 3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Flask
+        run: pip install "flask>=2.3" "werkzeug>=2.3"
+      - name: Compile the Python sources
+        run: |
+          python -m py_compile webui/app.py tests/verify_ab_update.py tests/verify_rauc_ui.py
+      - name: Check the inline JavaScript
+        run: |
+          python - <<'PY'
+          import re
+          page = open("webui/templates/index.html").read()
+          open("/tmp/dashboard.js", "w").write(
+              re.findall(r"<script>(.*?)</script>", page, re.S)[-1])
+          PY
+          node --check /tmp/dashboard.js
+      - name: A/B update and data partition suite
+        run: python tests/verify_ab_update.py
+      - name: System update card suite
+        run: python tests/verify_rauc_ui.py
+
+  verify-py27:
+    # The image runs Kodi 18, which brings Python 2.7; the web UI must work
+    # there too, so the real test suites run on a real 2.7 interpreter.
+    name: verify (Python 2.7)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run both suites under Python 2.7
+        # One script for CI and for a developer laptop: it uses python:2.7-slim
+        # through Docker and the same pins as this job, so `./tests/run-py27.sh`
+        # reproduces exactly what happens here.
+        run: sh tests/run-py27.sh
+
+  build-images:
+    name: build image (${{ matrix.board }})
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    # Buildroot 2021.02 brings GCC 10 and expects a 2019/2020-era host; the
+    # 22.04 image (GCC 11, glibc 2.35) is the closest runner that still exists.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        board: [pi1, pi2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Free disk space on the runner
+        # A Buildroot tree plus downloads and output is far more than the
+        # default ~14 GB of free space, so the preinstalled toolchains go.
+        run: |
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/lib/node_modules \
+            "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          df -h /
+
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bison flex libncurses-dev libssl-dev \
+            bc bzip2 cpio file git patch perl rsync sed tar unzip wget \
+            ca-certificates e2fsprogs dosfstools mtools python3
+
+      - name: Cache the Buildroot downloads
+        uses: actions/cache@v4
+        with:
+          path: dl
+          key: buildroot-dl-${{ hashFiles('br2-external/configs/*', 'br2-external/external.mk', 'br2-external/Config.in') }}
+          restore-keys: |
+            buildroot-dl-
+
+      - name: Build the ${{ matrix.board }} image
+        run: ./build_os.sh ${{ matrix.board }}
+
+      - name: Collect sdcard.img, bundle and checksum
+        run: |
+          set -e
+          mkdir -p artifacts
+          images="output/${{ matrix.board }}/images"
+          cp "$images/sdcard.img" artifacts/sdcard-${{ matrix.board }}.img
+          cp "$images"/iptvpi-*.raucb artifacts/
+          cp "$images"/iptvpi-*.raucb.sha256 artifacts/
+          ls -l artifacts
+          sha256sum artifacts/* > artifacts/SHA256SUMS
+
+      - name: Upload the image and the update bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: iptvpi-${{ matrix.board }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 30

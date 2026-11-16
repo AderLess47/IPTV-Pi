@@ -1,0 +1,52 @@
+# IPTV-Pi :: Raspberry Pi 1 (BCM2835, ARMv6)
+#
+# Installed as /boot/config.txt by post-image.sh. The base DTB that carries
+# the dtparam targets is staged alongside this file by the same hook.
+
+start_file=start.elf
+fixup_file=fixup.dat
+kernel=zImage
+
+# --- Display ---------------------------------------------------------------
+# Full screen output, no overscan borders, HDMI always considered attached
+# (an IPTV box is often booted with the TV switched off / on another input).
+disable_overscan=1
+hdmi_force_hotplug=1
+hdmi_drive=2
+avoid_warnings=1
+boot_delay=0
+
+# --- VideoCore memory ------------------------------------------------------
+# The firmware decodes H.264 in hardware and needs a frame buffer pool;
+# 100 MB is the practical minimum for 1080p on a 256 MB Pi 1.
+gpu_mem_256=100
+gpu_mem_512=128
+gpu_mem_1024=128
+
+# --- Dynamic CPU scaling (DVFS) -------------------------------------------
+# force_turbo=0 keeps the firmware's dynamic voltage/frequency scaling alive:
+# the CPU idles at arm_freq_min and ramps to arm_freq only under load.
+# Never set force_turbo=1 here, it would lock the clock at full speed and
+# turn this box into a space heater.
+force_turbo=0
+arm_freq=900
+arm_freq_min=600
+over_voltage=2
+
+# --- Dynamic H.264 decoder scaling ----------------------------------------
+# The VideoCore IV H.264 block is clocked independently: 400 MHz while
+# decoding, 250 MHz when idle.
+h264_freq=400
+h264_freq_min=250
+
+# --- SD card interface clock ----------------------------------------------
+# Applied by start.elf to the sdhost node of the staged base DTB.
+dtparam=sd_overclock=80
+
+# --- Audio -----------------------------------------------------------------
+# On-board analog + HDMI audio -> snd_bcm2835 (ALSA).
+dtparam=audio=on
+
+# NOTE: Kodi uses the legacy VideoCore display stack (dispmanx + MMAL).
+# Do *not* add dtoverlay=vc4-kms-v3d here, it would take the display away
+# from Kodi's Raspberry Pi platform.

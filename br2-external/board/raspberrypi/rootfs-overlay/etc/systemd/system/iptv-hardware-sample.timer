@@ -1,0 +1,15 @@
+[Unit]
+Description=IPTV-Pi hardware log sample (every 30 min)
+Documentation=file:/usr/share/iptv-webui/app.py
+
+[Timer]
+# One sample shortly after boot (temperatures are meaningful by then), then
+# every 30 minutes. No Persistent=true: a missed sample costs nothing, and a
+# burst of catch-up runs would only write to the SD card.
+OnBootSec=5min
+OnUnitActiveSec=30min
+AccuracySec=1min
+Unit=iptv-hardware-sample.service
+
+[Install]
+WantedBy=timers.target

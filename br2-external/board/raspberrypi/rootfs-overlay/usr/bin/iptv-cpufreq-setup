@@ -1,0 +1,47 @@
+#!/bin/sh
+#
+# IPTV-Pi: select the 'ondemand' CPU frequency governor on every core.
+#
+# The firmware keeps DVFS active because config.txt sets force_turbo=0. The
+# governor decides *when* to ramp: it idles at arm_freq_min and only reaches
+# arm_freq under load, which is what keeps a passively cooled Pi 1/2 cool.
+
+set -u
+
+governor="${IPTV_CPUFREQ_GOVERNOR:-ondemand}"
+cpu0=/sys/devices/system/cpu/cpu0/cpufreq
+available="${cpu0}/scaling_available_governors"
+
+if [ ! -r "${available}" ]; then
+	echo "iptv-cpufreq: no cpufreq support in this kernel, nothing to do" >&2
+	exit 0
+fi
+
+if ! grep -qw "${governor}" "${available}"; then
+	echo "iptv-cpufreq: governor '${governor}' not available (have: $(cat "${available}"))" >&2
+	exit 0
+fi
+
+for path in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+	[ -w "${path}" ] || continue
+	echo "${governor}" > "${path}" 2>/dev/null || true
+done
+
+# Raise ondemand's ramp threshold so the CPU only jumps to the top operating
+# point when it is really needed (default is 95, i.e. almost never). 75 keeps
+# the box at arm_freq_min while the GUI is idle and still ramps instantly for
+# stream start-up and menu animations.
+up_threshold="${IPTV_CPUFREQ_UP_THRESHOLD:-75}"
+for path in /sys/devices/system/cpu/cpufreq/ondemand/up_threshold; do
+	[ -w "${path}" ] || continue
+	echo "${up_threshold}" > "${path}" 2>/dev/null || true
+done
+
+cur="$(cat "${cpu0}/scaling_cur_freq" 2>/dev/null || echo 0)"
+min="$(cat "${cpu0}/scaling_min_freq" 2>/dev/null || echo 0)"
+max="$(cat "${cpu0}/scaling_max_freq" 2>/dev/null || echo 0)"
+threshold="$(cat /sys/devices/system/cpu/cpufreq/ondemand/up_threshold 2>/dev/null || echo n/a)"
+
+logger -t iptv-cpufreq \
+	"governor=${governor} up_threshold=${threshold} cur=$((cur / 1000))MHz min=$((min / 1000))MHz max=$((max / 1000))MHz" \
+	2>/dev/null || true

@@ -1,0 +1,17 @@
+[Unit]
+Description=IPTV-Pi scheduled playlist refresh (every 12 h)
+Documentation=file:/usr/share/iptv-webui/app.py
+
+[Timer]
+# First run 10 minutes after boot (network and Kodi are up by then), then once
+# every 12 hours, with jitter so a fleet of boxes does not hit the provider at
+# the same second.
+OnBootSec=10min
+OnUnitActiveSec=12h
+RandomizedDelaySec=30min
+AccuracySec=1min
+Persistent=true
+Unit=iptv-playlist-refresh.service
+
+[Install]
+WantedBy=timers.target

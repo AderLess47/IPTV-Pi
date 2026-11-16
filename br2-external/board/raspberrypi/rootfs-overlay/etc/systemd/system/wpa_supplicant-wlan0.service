@@ -1,0 +1,18 @@
+[Unit]
+Description=WPA supplicant for wlan0
+Wants=network-pre.target
+Before=network-pre.target
+After=network.target
+# Only start when a wireless interface actually exists (Pi 1/2 need a
+# USB dongle); this keeps the unit from failing on wired-only systems.
+BindsTo=sys-subsystem-net-devices-wlan0.device
+After=sys-subsystem-net-devices-wlan0.device
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/wpa_supplicant -c /etc/wpa_supplicant/wpa_supplicant-wlan0.conf -i wlan0 -D nl80211 -s
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

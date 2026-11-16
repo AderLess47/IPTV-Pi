@@ -1,0 +1,20 @@
+[Unit]
+Description=IPTV-Pi data partition first-boot setup
+Documentation=file:/usr/share/iptv-webui/app.py
+DefaultDependencies=no
+After=local-fs.target
+RequiresMountsFor=/var/lib/iptv
+# This has to finish before anything reads the playlist or the Kodi profile.
+Before=iptv-webui.service kodi.service iptv-playlist-refresh.timer iptv-health-watch.timer
+ConditionPathExists=/var/lib/iptv
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/iptv-data-init
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=2min
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+[Match]
+Name=eth0
+
+[Network]
+DHCP=yes
+# Always reachable on the LAN, even without a DHCP server.
+LinkLocalAddressing=ipv4

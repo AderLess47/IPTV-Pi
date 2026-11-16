@@ -1,0 +1,4 @@
+# IPTV-Pi: allow the 'video' group to talk to the VideoCore GPU.
+# Kodi runs as root here, so this only matters if you later run it as an
+# unprivileged user (MMAL/H.264 decode needs /dev/vchiq).
+KERNEL=="vchiq", GROUP="video", MODE="0660"

@@ -1,0 +1,39 @@
+[Unit]
+Description=Kodi media center (IPTV-Pi kiosk)
+Documentation=https://kodi.tv
+Wants=network-online.target
+After=network-online.target systemd-user-sessions.service iptv-data-init.service
+# /var/kodi is a symlink into the data partition, so the profile has to be
+# mounted before Kodi writes to it.
+RequiresMountsFor=/var/lib/iptv
+# Kodi owns the first virtual console, so no login shell may sit on it.
+Conflicts=getty@tty1.service
+# After Restart= gives up, report the failure through the alert webhook.
+OnFailure=iptv-unit-alert@%n.service
+
+[Service]
+Type=simple
+# Kodi 18 has no way to pass a profile directory; with HOME=/ its
+# configuration lives in /.kodi, which Buildroot symlinks to /var/kodi.
+Environment=HOME=/
+Environment=KODI_HOME=/usr/share/kodi
+Environment=AE_SINK=ALSA
+Environment=SDL_AUDIODRIVER=alsa
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal
+# br-kodi is Buildroot's launcher: it forwards SIGTERM to kodi.bin and
+# reboots/powers off when Kodi exits with its documented exit codes.
+ExecStart=/usr/bin/br-kodi /usr/lib/kodi/kodi.bin --standalone -fs
+Restart=always
+RestartSec=2
+# Video playback always wins: high CPU priority, best-effort I/O, and a very
+# low OOM score so the kernel kills the web UI (or anything else) before it
+# kills Kodi mid-stream.
+Nice=-10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=0
+OOMScoreAdjust=-500
+
+[Install]
+WantedBy=multi-user.target

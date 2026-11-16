@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<settings version="2">
+    <!-- IPTV-Pi: settings that Kodi only exposes through the GUI, seeded
+         here so a fresh image is already configured. Kodi merges unknown or
+         missing ids with its defaults, so a partial file is fine. -->
+
+    <!-- Local JSON-RPC API on 127.0.0.1:8080. The playlist web interface
+         uses it to reload the PVR client without restarting Kodi.
+         services.esallinterfaces=false keeps it bound to localhost only. -->
+    <setting id="services.webserver">true</setting>
+    <setting id="services.webserverport">8080</setting>
+    <setting id="services.webserverauthentication">false</setting>
+    <setting id="services.esallinterfaces">false</setting>
+    <setting id="services.webskin">webinterface.default</setting>
+
+    <!-- Everything below is a background service the box does not need:
+         each one costs RAM, a socket and periodic CPU wakeups, and this
+         appliance only plays the channels from playlist.m3u. -->
+
+    <!-- RSS ticker in the home screen: stops the feeds thread and its
+         periodic network fetches. -->
+    <setting id="lookandfeel.enablerssfeeds">false</setting>
+
+    <!-- EventServer (TCP 9777 remote control daemon): HDMI-CEC covers the
+         remote, so keep the port closed. -->
+    <setting id="services.esenabled">false</setting>
+    <setting id="services.esport">9777</setting>
+
+    <!-- UPnP/DLNA library server and its announcements. -->
+    <setting id="services.upnp">false</setting>
+    <setting id="services.upnpannounce">false</setting>
+
+    <!-- AirPlay receiver and Zeroconf/mDNS announcements. Note that mDNS
+         discovery of the box itself then stops working - reach the web UI
+         by IP address instead (http://<board-ip>/). -->
+    <setting id="services.airplay">false</setting>
+    <setting id="services.zeroconf">false</setting>
+
+    <!-- Weather has no enable switch in Kodi 18: it only runs when a weather
+         add-on is configured, and this image ships none. The line below
+         clears any leftover selection anyway. -->
+    <setting id="weather.currentlocation">-1</setting>
+
+    <!-- Do not pull media metadata or chapter thumbnails for streaming
+         content: saves CPU time and memory on ARMv6/ARMv7. -->
+    <setting id="myvideos.extractflags">false</setting>
+    <setting id="myvideos.extractchapterthumbs">false</setting>
+</settings>

@@ -1,0 +1,21 @@
+[Unit]
+Description=IPTV-Pi system health watchdog
+Documentation=file:/usr/share/iptv-webui/app.py
+After=network.target iptv-data-init.service
+RequiresMountsFor=/var/lib/iptv
+
+[Service]
+Type=oneshot
+# Samples failed units, journal errors, throttling, OOM kills and free space.
+# Writes one line into errors.log only when something changed, so the SD card
+# sees roughly one write per real event instead of one per run.
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONOPTIMIZE=2
+Environment=IPTV_PLAYLIST=/var/lib/iptv/playlist.m3u
+ExecStart=/usr/share/iptv-webui/launch.sh --health
+Nice=19
+IOSchedulingClass=idle
+MemoryAccounting=yes
+MemoryMax=32M
+TimeoutStartSec=2min

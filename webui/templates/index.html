@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPTV-Pi</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header>
+    <h1>IPTV<span>-Pi</span></h1>
+    <p class="sub">Playlist manager &middot; <code>{{ stats.path }}</code></p>
+</header>
+
+<main>
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card hw" id="hw-panel">
+        <div class="stat">
+            <span class="label">CPU temp</span>
+            <strong id="hw-cpu">{% if hardware.cpu_temp_c is not none %}{{ hardware.cpu_temp_c }} &deg;C{% else %}n/a{% endif %}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">GPU temp</span>
+            <strong id="hw-gpu">{% if hardware.gpu_temp_c is not none %}{{ hardware.gpu_temp_c }} &deg;C{% else %}n/a{% endif %}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">ARM clock</span>
+            <strong id="hw-arm">{% if hardware.arm_mhz is not none %}{{ hardware.arm_mhz }} MHz{% else %}n/a{% endif %}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">H.264 clock</span>
+            <strong id="hw-h264">{% if hardware.h264_mhz is not none %}{{ hardware.h264_mhz }} MHz{% else %}n/a{% endif %}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">RAM free</span>
+            <strong id="hw-ram">{% if hardware.mem_available_mb is not none %}{{ hardware.mem_available_mb }} / {{ hardware.mem_total_mb }} MB{% else %}n/a{% endif %}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">Swap / zram</span>
+            <strong id="hw-swap">{% if hardware.swap_total_mb %}{{ (hardware.swap_total_mb - hardware.swap_free_mb) | round(0) | int }} / {{ hardware.swap_total_mb }} MB{% else %}off{% endif %}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">Governor</span>
+            <strong id="hw-governor">{{ hardware.governor or "n/a" }}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">Load</span>
+            <strong id="hw-load">{{ hardware.load[0] if hardware.load[0] is not none else "n/a" }}</strong>
+        </div>
+        <p class="hint">Telemetry only runs while this tab is visible:
+        switch away (or close it) and the box stops polling entirely.</p>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card status">
+        <div class="stat">
+            <span class="label">Channels</span>
+            <strong id="stat-channels">{{ stats.channels }}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">Size</span>
+            <strong id="stat-size">{{ "%.1f" | format(stats.bytes / 1024.0) }} KB</strong>
+        </div>
+        <div class="stat">
+            <span class="label">Updated</span>
+            <strong id="stat-modified">{{ stats.modified or "never" }}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">Kodi</span>
+            <strong id="stat-kodi">{{ kodi }}</strong>
+        </div>
+        <div class="stat actions">
+            <button type="button" id="restart-button" class="secondary">Restart Kodi</button>
+            <a href="/playlist.m3u" class="link">Download active playlist</a>
+        </div>
+    </section>
+
+    <p id="message" class="message" role="status" aria-live="polite"></p>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card status">
+        <div class="stat">
+            <span class="label">Auto refresh</span>
+            <strong id="refresh-enabled">{% if refresh.enabled %}every 12 h{% else %}off (no URL saved){% endif %}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">Source</span>
+            <strong id="refresh-source">{% if refresh.source_url %}{{ refresh.source_url }}{% else %}&mdash;{% endif %}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">Last run</span>
+            <strong id="refresh-last"{% if refresh.last and not refresh.last.ok %} class="error-text"{% endif %}>{% if refresh.last %}{{ refresh.last.at }} &middot; {{ "ok" if refresh.last.ok else "failed" }} &middot; {{ refresh.last.status_label }}{% else %}never{% endif %}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">Next run</span>
+            <strong id="refresh-next">{% if refresh.next_run %}{{ refresh.next_run }}{% elif refresh.enabled %}unknown{% else %}&mdash;{% endif %}</strong>
+        </div>
+        <div class="stat actions">
+            <button type="button" id="refresh-now" class="secondary"{% if not refresh.enabled %} disabled{% endif %}>Refresh now</button>
+        </div>
+        <p class="hint" id="refresh-message">{% if refresh.last %}{{ refresh.last.message }}{% else %}Save a playlist URL below to have it re-fetched automatically.{% endif %}</p>
+        <p class="warning-text" id="refresh-warning"{% if not refresh.warning %} hidden{% endif %}>{% if refresh.warning %}{{ refresh.warning }}{% endif %}</p>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card">
+        <h2>Failure alerts</h2>
+        <form id="form-notify" action="/api/notify" method="post">
+            <input type="url" id="notify-url" name="url" value="{{ alerts.url }}"
+                   placeholder="https://hooks.example.com/iptv-alerts">
+            <p class="hint">When the refresh fails {{ refresh.failure_limit }} times in
+            a row the box POSTs a small JSON body (<code>text</code>,
+            <code>content</code>, <code>event</code>, <code>failures</code>,
+            <code>http_status</code>, <code>playlist_url</code>) here, once per
+            streak. Slack and Discord webhook URLs work as-is. Leave empty to
+            disable.{% if alerts.source == "environment" %} Currently taken from
+            <code>IPTV_NOTIFY_URL</code> in the service environment.{% endif %}</p>
+            <button type="submit">Save alert URL</button>
+        </form>
+        <p class="hint" id="alert-last">{% if alerts.last %}{{ alerts.last.at }} &middot; {{ "sent" if alerts.last.ok else "failed" }} &middot; {{ alerts.last.message }}{% else %}No alert sent yet.{% endif %}</p>
+    </section>
+
+    <label class="toggle">
+        <input type="checkbox" id="restart-kodi" checked>
+        Reload Kodi after saving
+    </label>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card">
+        <h2>Channel groups</h2>
+        <p class="hint">IPTV-Pi keeps the full playlist and writes only the
+        selected groups to <code>playlist.m3u</code>. Fewer channels means a
+        smaller Kodi channel list and less RAM in use.</p>
+        <div id="group-list" class="groups">
+            {% if groups %}
+            {% for group in groups %}
+            <label class="group">
+                <input type="checkbox" class="group-checkbox" value="{{ group.name }}"
+                       {% if group.name in selected %}checked{% endif %}>
+                <span class="group-name">{{ group.name }}</span>
+                <span class="count">{{ group.channels }}</span>
+            </label>
+            {% endfor %}
+            {% else %}
+            <p class="hint" id="group-empty">No playlist loaded yet &mdash; save one below.</p>
+            {% endif %}
+        </div>
+        <div class="row">
+            <button type="button" id="groups-apply">Apply selection</button>
+            <button type="button" id="groups-all" class="secondary">Select all</button>
+            <button type="button" id="groups-none" class="secondary">Select none</button>
+        </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card">
+        <h2>EPG (XMLTV)</h2>
+        <form id="form-epg" action="/api/epg" method="post">
+            <input type="url" id="epg-url" name="url" value="{{ epg_url }}"
+                   placeholder="http://provider.example/epg.xml.gz">
+            <p class="hint">Leave empty to disable the programme guide.
+            The add-on caches the guide on the SD card, not in RAM.</p>
+            <button type="submit">Save EPG URL</button>
+        </form>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card">
+        <h2>Logs</h2>
+        <p class="hint">Two rotated files in <code>{{ logs.dir }}</code> (max
+        {{ logs.max_kb }} KB each, one previous copy kept). The error log records
+        failed refreshes, Kodi reloads, alerts and updates; the hardware log gets
+        one sample every 30 minutes.</p>
+        <details>
+            <summary>Errors <span class="count">{{ logs.errors.size_kb }} KB</span></summary>
+            <pre class="log-box" id="log-errors">{% for line in logs.errors.lines %}{{ line }}
+{% endfor %}{% if not logs.errors.lines %}no errors logged{% endif %}</pre>
+        </details>
+        <details>
+            <summary>Hardware <span class="count">{{ logs.hardware.size_kb }} KB</span></summary>
+            <pre class="log-box" id="log-hardware">{% for line in logs.hardware.lines %}{{ line }}
+{% endfor %}{% if not logs.hardware.lines %}no samples yet{% endif %}</pre>
+        </details>
+        <div class="row">
+            <button type="button" id="logs-reload" class="secondary">Reload logs</button>
+        </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card status">
+        <h2>System state</h2>
+        <p class="hint">Below the app: failed units, power/thermal flags, OOM
+        kills and free space. Sampled by <code>{{ health.timer }}</code> every
+        10 minutes; this sample was taken at {{ health.at }}.</p>
+        <div class="stat">
+            <span class="label">Status</span>
+            <strong id="health-summary" class="{% if health.ok %}health-ok{% else %}health-bad{% endif %}">{{ health.summary }}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">Failed units</span>
+            <strong id="health-units">{% if health.failed_units %}{{ health.failed_units | join(", ") }}{% else %}none{% endif %}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">Power / thermal</span>
+            <strong id="health-power">{% if health.throttled.current or health.throttled.since_boot %}{{ (health.throttled.current + health.throttled.since_boot) | join(", ") }}{% else %}ok{% endif %}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">OOM kills</span>
+            <strong id="health-oom">{{ health.oom_kills if health.oom_kills is not none else "n/a" }}</strong>
+        </div>
+        <div class="stat">
+            <span class="label">Free space</span>
+            <strong id="health-disk">{{ health.disk.root.free_mb }} MB root / {{ health.disk.data.free_mb }} MB data</strong>
+        </div>
+        <details>
+            <summary>Journal errors this boot <span class="count">{{ health.journal_error_count }}</span></summary>
+            <pre class="log-box" id="log-journal">{% for line in health.journal_errors %}{{ line }}
+{% endfor %}{% if not health.journal_errors %}no error lines in the journal{% endif %}</pre>
+        </details>
+        <div class="row">
+            <button type="button" id="health-reload" class="secondary">Reload system state</button>
+        </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card">
+        <h2>Update the app</h2>
+        <p class="hint">Running <strong id="update-running">{{ update.running }}</strong>,
+        installed <strong id="update-installed">{{ update.installed }}</strong>{% if update.overlay %} in <code>{{ update.dir }}</code>{% endif %}{% if update.backup %}, previous version <strong>{{ update.backup }}</strong>{% endif %}.</p>
+        <form id="form-update" action="/api/update" method="post" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".gz,.tgz,application/gzip" required>
+            <p class="hint">A <code>.tar.gz</code> with <code>app.py</code> at its root
+            (plus optional <code>launch.sh</code>, <code>templates/</code> and
+            <code>static/</code>), at most {{ update.max_bytes // 1024 }} KB. Only
+            those paths are accepted; the new <code>app.py</code> has to compile,
+            the previous version is kept as <code>app.bak</code>, and
+            <code>{{ update.unit }}</code> restarts to load it.</p>
+            <button type="submit">Install update</button>
+        </form>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card">
+        <h2>System update (A/B)</h2>
+        <p class="hint">Running slot <strong id="rauc-booted">{{ rauc.booted or "unknown" }}</strong>,
+        next boot from <strong id="rauc-primary">{{ rauc.primary or "unknown" }}</strong>{% if rauc.compatible %}
+        &middot; compatible <code>{{ rauc.compatible }}</code>{% endif %}. An update is written
+        to the inactive slot and <code>cmdline.txt</code> is switched over; a reboot
+        activates it, the previous system stays available in the other slot.</p>
+        <div class="slots" id="rauc-slots">
+            {% for slot in rauc.slots %}
+            <div class="slot">
+                <span class="slot-name">Slot {{ slot.bootname }}</span>
+                <span class="slot-badge {{ 'health-ok' if slot.state == 'good' else ('health-bad' if slot.state == 'bad' else '') }}">{{ slot.state }}</span>
+                {% if slot.booted %}<span class="slot-note">booted</span>{% endif %}
+                {% if slot.primary %}<span class="slot-note">next boot</span>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% if rauc.available %}
+        <form id="form-rauc" action="/api/rauc/install" method="post" enctype="multipart/form-data">
+            <input type="file" name="bundle" accept=".raucb" required>
+            <input type="text" name="sha256" autocomplete="off" spellcheck="false"
+                   placeholder="SHA-256 of the bundle (optional)">
+            <p class="hint">A signed <code>.raucb</code> bundle, at most
+            {{ rauc.max_bytes // 1024 // 1024 }} MB. It is stored in
+            <code>{{ rauc.dir }}</code> ({{ rauc.free_mb }} MB free) and installed in the
+            background, so this page stays usable while the slot is written. Uploading
+            does not reboot the box.</p>
+            <p class="hint">Paste the checksum from
+            <code>iptvpi-&lt;version&gt;.raucb.sha256</code> next to the bundle and a file
+            that does not match is refused before RAUC sees it. Without one the
+            signature check still decides.</p>
+            <button type="submit">Upload &amp; install</button>
+        </form>
+        <form id="form-rauc-url" action="/api/rauc/install" method="post">
+            <input type="text" name="url" placeholder="http://192.168.1.10/iptvpi-1.2.3.raucb">
+            <input type="text" name="sha256" autocomplete="off" spellcheck="false"
+                   placeholder="SHA-256 of the bundle (optional)">
+            <p class="hint">Or let the box fetch the bundle from a server in your
+            network (exactly what the playlist URL does). It downloads the file
+            itself, with the same size and free-space limits, and installs it right
+            away. Leave the checksum empty and the box fetches
+            <code>&lt;bundle&gt;.raucb.sha256</code> next to it and compares that.
+            The signature is checked against <code>/etc/rauc/ca.cert.pem</code>
+            either way.</p>
+            <button type="submit">Fetch &amp; install</button>
+        </form>
+        <label class="check">
+            <input type="checkbox" id="rauc-reboot">
+            reboot automatically when the install finished
+        </label>
+        <div id="rauc-progress"{% if not rauc.install.running %} hidden{% endif %}>
+            <div class="progress"><div class="progress-bar" id="rauc-bar"></div></div>
+            <p class="hint" id="rauc-progress-text"></p>
+        </div>
+        <p class="hint" id="rauc-last">{{ rauc.install.message if rauc.install.state != "idle" else "No update installed during this boot." }}</p>
+        <p class="hint" id="rauc-verify"{% if rauc.update_check.state == "none" %} hidden{% endif %}>{{ rauc.update_check.message }}</p>
+        <div class="row">
+            <button type="button" id="rauc-reboot-now" class="secondary">Reboot now</button>
+            <span class="hint">Boots the slot <code>cmdline.txt</code> points at — use it
+            when an update was installed without the automatic reboot.</span>
+        </div>
+        <details id="rauc-history"{% if rauc.history_alert %} open{% endif %}{% if not rauc.history %} hidden{% endif %}>
+            <summary>Last updates <span class="count{{ ' health-bad' if rauc.history_alert else '' }}" id="rauc-history-count">{{ rauc.history | length }}</span>{% if rauc.history_problems %}<span class="count health-bad history-problems" id="rauc-history-problems" role="button" tabindex="0" title="entries with a problem – click to show only those">{{ rauc.history_problems }}</span>{% else %}<span class="count health-bad history-problems" id="rauc-history-problems" role="button" tabindex="0" title="entries with a problem – click to show only those" hidden>0</span>{% endif %}</summary>
+            <label class="check history-filter">
+                <input type="checkbox" id="rauc-history-filter">
+                only failed and warned
+            </label>
+            <ul class="history" id="rauc-history-list">
+                {% for item in rauc.history %}
+                <li>
+                    <span class="history-when">{{ item.finished_at or item.started_at }}</span>
+                    <span class="slot-badge {{ 'health-ok' if item.state in ('installed', 'verified') else 'health-bad' }}">{{ item.state }}</span>
+                    <span class="history-bundle">{{ item.bundle }}</span>
+                    {% if item.version %}<span class="history-version">v{{ item.version }}</span>{% endif %}
+                    {% if item.sha256 %}<span class="history-hash" title="{{ item.sha256 }}">sha256 {{ item.sha256[:12] }}…</span>{% endif %}
+                    {% if item.checksum_source %}<span class="history-hash-source">{{ 'typed' if item.checksum_source == 'typed' else 'from .sha256' }}</span>{% endif %}
+                    <span class="history-source" title="{{ item.origin }}">{{ item.source }}</span>
+                    <span class="history-note">{{ item.message }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </details>
+        {% else %}
+        <p class="hint">RAUC is not part of this image, so a system update is only
+        possible by reflashing the card.</p>
+        {% endif %}
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card">
+        <h2>Upload a playlist file</h2>
+        <form id="form-file" action="/api/playlist" method="post" enctype="multipart/form-data">
+            <input type="hidden" name="mode" value="file">
+            <input type="file" name="file" accept=".m3u,.m3u8,text/plain,audio/x-mpegurl" required>
+            <button type="submit">Upload &amp; save</button>
+        </form>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card">
+        <h2>Paste a playlist</h2>
+        <form id="form-paste" action="/api/playlist" method="post">
+            <input type="hidden" name="mode" value="paste">
+            <textarea name="content" rows="7" spellcheck="false" required
+                      placeholder="#EXTM3U&#10;#EXTINF:-1 tvg-id=&quot;one&quot; group-title=&quot;News&quot;,Channel One&#10;http://example.org/one.m3u8"></textarea>
+            <button type="submit">Save pasted playlist</button>
+        </form>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="card">
+        <h2>Load from a URL</h2>
+        <form id="form-url" action="/api/playlist" method="post">
+            <input type="hidden" name="mode" value="url">
+            <input type="url" name="url" placeholder="http://provider.example/playlist.m3u" required>
+            <p class="hint">The box downloads the playlist itself, so the URL
+            has to be reachable from your network. A saved URL is re-fetched
+            automatically every 12 hours (keeping your group selection);
+            uploading a file or pasting text switches that off again.</p>
+            <button type="submit">Fetch &amp; save</button>
+        </form>
+    </section>
+
+    <footer>
+        <p>Files stay on the device. The previous playlist is kept as
+        <code>playlist.m3u.bak</code>, the unfiltered one as
+        <code>playlist.full.m3u</code>. This page has no login &mdash; keep it
+        on your local network.</p>
+    </footer>
+</main>
+
+<script>
+(function () {
+    "use strict";
+
+    var message = document.getElementById("message");
+    var fields = {
+        channels: document.getElementById("stat-channels"),
+        size: document.getElementById("stat-size"),
+        modified: document.getElementById("stat-modified"),
+        kodi: document.getElementById("stat-kodi"),
+        cpu: document.getElementById("hw-cpu"),
+        gpu: document.getElementById("hw-gpu"),
+        arm: document.getElementById("hw-arm"),
+        h264: document.getElementById("hw-h264"),
+        ram: document.getElementById("hw-ram"),
+        swap: document.getElementById("hw-swap"),
+        governor: document.getElementById("hw-governor"),
+        load: document.getElementById("hw-load")
+    };
+
+    function setMessage(text, ok) {
+        message.textContent = text;
+        message.className = "message " + (ok ? "ok" : "error");
+    }
+
+    var refreshEnabled = false;
+
+    function setBusy(busy) {
+        var buttons = document.querySelectorAll("button");
+        for (var i = 0; i < buttons.length; i++) {
+            var isRefresh = buttons[i].id === "refresh-now";
+            buttons[i].disabled = busy || (isRefresh && !refreshEnabled);
+        }
+    }
+
+    function textOr(value, suffix) {
+        if (value === null || value === undefined) {
+            return "n/a";
+        }
+        return value + suffix;
+    }
+
+    function renderPlaylist(playlist) {
+        if (!playlist) { return; }
+        fields.channels.textContent = playlist.channels;
+        fields.size.textContent = (playlist.bytes / 1024).toFixed(1) + " KB";
+        fields.modified.textContent = playlist.modified || "never";
+    }
+
+    function renderKodi(state) {
+        if (state) { fields.kodi.textContent = state; }
+    }
+
+    function renderGroups(groups, selected) {
+        var container = document.getElementById("group-list");
+        if (!container) { return; }
+        if (!groups || !groups.length) {
+            container.textContent = "";
+            var empty = document.createElement("p");
+            empty.className = "hint";
+            empty.textContent = "No playlist loaded yet \u2014 save one below.";
+            container.appendChild(empty);
+            return;
+        }
+        var chosen = {};
+        for (var i = 0; i < (selected || []).length; i++) {
+            chosen[selected[i]] = true;
+        }
+        container.textContent = "";
+        for (var j = 0; j < groups.length; j++) {
+            var group = groups[j];
+            var label = document.createElement("label");
+            label.className = "group";
+
+            var box = document.createElement("input");
+            box.type = "checkbox";
+            box.className = "group-checkbox";
+            box.value = group.name;
+            box.checked = chosen[group.name] === true;
+
+            var name = document.createElement("span");
+            name.className = "group-name";
+            name.textContent = group.name;
+
+            var count = document.createElement("span");
+            count.className = "count";
+            count.textContent = group.channels;
+
+            label.appendChild(box);
+            label.appendChild(name);
+            label.appendChild(count);
+            container.appendChild(label);
+        }
+    }
+
+    function renderHardware(hw) {
+        if (!hw) { return; }
+        fields.cpu.textContent = textOr(hw.cpu_temp_c, " \u00b0C");
+        fields.gpu.textContent = textOr(hw.gpu_temp_c, " \u00b0C");
+        fields.arm.textContent = textOr(hw.arm_mhz, " MHz");
+        fields.h264.textContent = textOr(hw.h264_mhz, " MHz");
+        if (hw.mem_available_mb === null || hw.mem_available_mb === undefined) {
+            fields.ram.textContent = "n/a";
+        } else {
+            fields.ram.textContent = hw.mem_available_mb + " / " + hw.mem_total_mb + " MB";
+        }
+        if (hw.swap_total_mb) {
+            var used = Math.round(hw.swap_total_mb - hw.swap_free_mb);
+            fields.swap.textContent = used + " / " + hw.swap_total_mb + " MB";
+        } else {
+            fields.swap.textContent = "off";
+        }
+        fields.governor.textContent = hw.governor || "n/a";
+        fields.load.textContent = (hw.load && hw.load[0] !== null)
+            ? hw.load[0] : "n/a";
+        var epg = document.getElementById("epg-url");
+        if (epg && document.activeElement !== epg && hw.epg_url !== undefined) {
+            epg.value = hw.epg_url || "";
+        }
+    }
+
+    function refreshHardware() {
+        fetch("/api/stats", { headers: { "Accept": "application/json" } })
+            .then(function (response) { return response.json(); })
+            .then(renderHardware)
+            .catch(function () { /* keep the last values */ });
+    }
+
+    function renderRefresh(info) {
+        if (!info) { return; }
+        document.getElementById("refresh-enabled").textContent =
+            info.enabled ? "every 12 h" : "off (no URL saved)";
+        document.getElementById("refresh-source").textContent =
+            info.source_url || "\u2014";
+
+        var last = document.getElementById("refresh-last");
+        var hint = document.getElementById("refresh-message");
+        if (info.last) {
+            last.textContent = info.last.at + " \u00b7 "
+                + (info.last.ok ? "ok" : "failed") + " \u00b7 "
+                + (info.last.status_label || "no response");
+            last.className = info.last.ok ? "ok-text" : "error-text";
+            hint.textContent = info.last.message || "";
+        } else {
+            last.textContent = "never";
+            last.className = "";
+            hint.textContent = "Save a playlist URL below to have it re-fetched automatically.";
+        }
+
+        // Only shown once the failure streak is long enough to be an outage;
+        // the sentence itself comes from the server.
+        var warning = document.getElementById("refresh-warning");
+        if (warning) {
+            if (info.warning) {
+                warning.textContent = info.warning;
+                warning.hidden = false;
+            } else {
+                warning.textContent = "";
+                warning.hidden = true;
+            }
+        }
+
+        var next = document.getElementById("refresh-next");
+        if (info.next_run) {
+            next.textContent = info.next_run;
+        } else {
+            next.textContent = info.enabled ? "unknown (systemd unreachable)" : "\u2014";
+        }
+
+        // Without a saved URL there is nothing to refresh.
+        refreshEnabled = info.enabled === true;
+        var button = document.getElementById("refresh-now");
+        if (button) { button.disabled = !refreshEnabled; }
+    }
+
+    function renderHealth(info) {
+        if (!info) { return; }
+        var summary = document.getElementById("health-summary");
+        if (summary) {
+            summary.textContent = info.summary;
+            summary.className = info.ok ? "health-ok" : "health-bad";
+        }
+        var units = document.getElementById("health-units");
+        if (units) {
+            units.textContent = (info.failed_units && info.failed_units.length)
+                ? info.failed_units.join(", ") : "none";
+        }
+        var power = document.getElementById("health-power");
+        if (power) {
+            var flags = (info.throttled.current || []).concat(info.throttled.since_boot || []);
+            power.textContent = flags.length ? flags.join(", ") : "ok";
+        }
+        var oom = document.getElementById("health-oom");
+        if (oom) {
+            oom.textContent = (info.oom_kills === null || info.oom_kills === undefined)
+                ? "n/a" : info.oom_kills;
+        }
+        var disk = document.getElementById("health-disk");
+        if (disk) {
+            disk.textContent = info.disk.root.free_mb + " MB root / "
+                + info.disk.data.free_mb + " MB data";
+        }
+        var journal = document.getElementById("log-journal");
+        if (journal) {
+            journal.textContent = (info.journal_errors || []).join("\n")
+                || "no error lines in the journal";
+        }
+    }
+
+    function renderUpdate(info) {
+        if (!info) { return; }
+        var running = document.getElementById("update-running");
+        var installed = document.getElementById("update-installed");
+        if (running) { running.textContent = info.running; }
+        if (installed) { installed.textContent = info.installed; }
+    }
+
+    function renderRaucSlots(slots) {
+        var container = document.getElementById("rauc-slots");
+        if (!container || !slots) { return; }
+        container.textContent = "";
+        for (var i = 0; i < slots.length; i++) {
+            var slot = slots[i];
+            var row = document.createElement("div");
+            row.className = "slot";
+
+            var name = document.createElement("span");
+            name.className = "slot-name";
+            name.textContent = "Slot " + slot.bootname;
+            row.appendChild(name);
+
+            var badge = document.createElement("span");
+            badge.className = "slot-badge";
+            if (slot.state === "good") { badge.className += " health-ok"; }
+            if (slot.state === "bad") { badge.className += " health-bad"; }
+            badge.textContent = slot.state;
+            row.appendChild(badge);
+
+            if (slot.booted) { row.appendChild(raucNote("booted")); }
+            if (slot.primary) { row.appendChild(raucNote("next boot")); }
+            container.appendChild(row);
+        }
+    }
+
+    function raucNote(text) {
+        var note = document.createElement("span");
+        note.className = "slot-note";
+        note.textContent = text;
+        return note;
+    }
+
+    var historyTouched = false;
+
+    var raucHistoryItems = [];
+    var raucHistoryFilter = document.getElementById("rauc-history-filter");
+
+    function renderRaucHistory(items) {
+        var details = document.getElementById("rauc-history");
+        var list = document.getElementById("rauc-history-list");
+        if (!details || !list) { return; }
+        var entries = items || [];
+        raucHistoryItems = entries;
+        var alert = entries.length > 0
+            && (entries[0].state === "failed" || entries[0].state === "warning");
+        details.hidden = entries.length === 0;
+        // Open by itself only while the user has not touched it: the newest
+        // entry being a failure should be visible without a click.
+        if (!historyTouched) { details.open = alert; }
+        paintRaucHistory();
+    }
+
+    // The filter only decides what is listed: the newest entry still decides
+    // the colour of the counter and whether the block opens, so a problem never
+    // hides behind the filter.
+    function paintRaucHistory() {
+        var list = document.getElementById("rauc-history-list");
+        if (!list) { return; }
+        var onlyProblems = !!(raucHistoryFilter && raucHistoryFilter.checked);
+        var entries = raucHistoryItems;
+        var shown = entries;
+        if (onlyProblems) {
+            shown = [];
+            for (var j = 0; j < entries.length; j++) {
+                if (entries[j].state === "failed" || entries[j].state === "warning") {
+                    shown.push(entries[j]);
+                }
+            }
+        }
+        var problems = 0;
+        for (var k = 0; k < entries.length; k++) {
+            if (entries[k].state === "failed" || entries[k].state === "warning") {
+                problems += 1;
+            }
+        }
+        var count = document.getElementById("rauc-history-count");
+        if (count) {
+            var alert = entries.length > 0
+                && (entries[0].state === "failed" || entries[0].state === "warning");
+            count.textContent = onlyProblems
+                ? shown.length + "/" + entries.length : entries.length;
+            count.className = "count" + (alert ? " health-bad" : "");
+        }
+        // How many entries report a problem, independent of the filter.
+        var problemCount = document.getElementById("rauc-history-problems");
+        if (problemCount) {
+            problemCount.textContent = problems;
+            problemCount.hidden = problems === 0;
+        }
+        list.textContent = "";
+        if (onlyProblems && !shown.length) {
+            var empty = document.createElement("li");
+            empty.className = "history-note";
+            empty.textContent = "no failed or warned updates";
+            list.appendChild(empty);
+            return;
+        }
+        for (var i = 0; i < shown.length; i++) {
+            var entry = shown[i];
+            var row = document.createElement("li");
+
+            var when = document.createElement("span");
+            when.className = "history-when";
+            when.textContent = entry.finished_at || entry.started_at || "";
+            row.appendChild(when);
+
+            var badge = document.createElement("span");
+            badge.className = "slot-badge"
+                + (entry.state === "installed" || entry.state === "verified"
+                    ? " health-ok" : " health-bad");
+            badge.textContent = entry.state || "unknown";
+            row.appendChild(badge);
+
+            var name = document.createElement("span");
+            name.className = "history-bundle";
+            name.textContent = entry.bundle || "";
+            row.appendChild(name);
+
+            if (entry.version) {
+                var version = document.createElement("span");
+                version.className = "history-version";
+                version.textContent = "v" + entry.version;
+                row.appendChild(version);
+            }
+
+            if (entry.sha256) {
+                var hash = document.createElement("span");
+                hash.className = "history-hash";
+                hash.textContent = "sha256 " + entry.sha256.slice(0, 12) + "\u2026";
+                hash.title = entry.sha256;
+                row.appendChild(hash);
+            }
+
+            if (entry.checksum_source) {
+                var origin = document.createElement("span");
+                origin.className = "history-hash-source";
+                origin.textContent = entry.checksum_source === "typed"
+                    ? "typed" : "from .sha256";
+                row.appendChild(origin);
+            }
+
+            var source = document.createElement("span");
+            source.className = "history-source";
+            source.textContent = entry.source || "";
+            if (entry.origin) { source.title = entry.origin; }
+            row.appendChild(source);
+
+            if (entry.message) {
+                var note = document.createElement("span");
+                note.className = "history-note";
+                note.textContent = entry.message;
+                row.appendChild(note);
+            }
+            list.appendChild(row);
+        }
+    }
+
+    function renderRauc(info) {
+        if (!info) { return; }
+        var booted = document.getElementById("rauc-booted");
+        if (booted) { booted.textContent = info.booted || "unknown"; }
+        var primary = document.getElementById("rauc-primary");
+        if (primary) { primary.textContent = info.primary || "unknown"; }
+        renderRaucSlots(info.slots);
+        renderRaucHistory(info.history);
+
+        var install = info.install || {};
+        var running = install.state === "running";
+        var box = document.getElementById("rauc-progress");
+        var bar = document.getElementById("rauc-bar");
+        var text = document.getElementById("rauc-progress-text");
+        if (box) { box.hidden = !running; }
+        if (bar) { bar.style.width = (install.percent || 0) + "%"; }
+        if (text && running) {
+            text.textContent = (install.percent || 0) + "% \u00b7 "
+                + (install.step || "starting")
+                + (install.message ? " \u00b7 " + install.message : "");
+        }
+
+        var verify = document.getElementById("rauc-verify");
+        if (verify) {
+            var check = info.update_check || { state: "none" };
+            if (!check.state || check.state === "none") {
+                verify.hidden = true;
+                verify.textContent = "";
+                verify.className = "hint";
+            } else {
+                var prefix = check.state === "ok" ? "Update verified: "
+                    : (check.state === "warning" ? "Warning: "
+                        : (check.state === "failed" ? "Update failed: " : "Update "));
+                verify.hidden = false;
+                verify.textContent = prefix + (check.message || "")
+                    + (check.verified_at ? " (" + check.verified_at + ")" : "");
+                verify.className = "hint"
+                    + (check.state === "ok" ? " health-ok" : "")
+                    + (check.state === "warning" || check.state === "failed"
+                        ? " health-bad" : "");
+            }
+        }
+
+        var last = document.getElementById("rauc-last");
+        if (last) {
+            if (install.state === "success") {
+                last.textContent = (install.bundle || "bundle") + " installed "
+                    + (install.finished_at || "") + " \u2014 reboot to boot the new slot.";
+                last.className = "hint health-ok";
+            } else if (install.state === "error") {
+                last.textContent = "install failed: " + (install.error || "unknown error");
+                last.className = "hint health-bad";
+            } else if (install.state === "running") {
+                last.textContent = install.step || "installing...";
+                last.className = "hint";
+            }
+        }
+    }
+
+    var raucTimer = null;
+
+    function scheduleRaucPolling(running) {
+        if (running && raucTimer === null && !document.hidden) {
+            raucTimer = window.setInterval(refreshRauc, 2000);
+        } else if (!running && raucTimer !== null) {
+            window.clearInterval(raucTimer);
+            raucTimer = null;
+        }
+    }
+
+    function refreshRauc() {
+        fetch("/api/rauc", { headers: { "Accept": "application/json" } })
+            .then(function (response) { return response.json(); })
+            .then(function (data) {
+                renderRauc(data.rauc);
+                scheduleRaucPolling(data.rauc && data.rauc.install
+                    && data.rauc.install.running);
+            })
+            .catch(function () { /* keep the last values */ });
+    }
+
+    function renderLogs(payload) {
+        if (!payload) { return; }
+        var errors = document.getElementById("log-errors");
+        var hardware = document.getElementById("log-hardware");
+        if (errors) {
+            errors.textContent = (payload.errors.lines || []).join("\n")
+                || "no errors logged";
+        }
+        if (hardware) {
+            hardware.textContent = (payload.hardware.lines || []).join("\n")
+                || "no samples yet";
+        }
+    }
+
+    function renderAlerts(info) {
+        if (!info) { return; }
+        var field = document.getElementById("notify-url");
+        if (field && document.activeElement !== field) {
+            field.value = info.url || "";
+        }
+        var last = document.getElementById("alert-last");
+        if (!last) { return; }
+        if (info.last) {
+            last.textContent = info.last.at + " \u00b7 "
+                + (info.last.ok ? "sent" : "failed") + " \u00b7 "
+                + (info.last.message || "");
+            last.className = info.last.ok ? "hint" : "hint error-text";
+        } else {
+            last.textContent = "No alert sent yet.";
+            last.className = "hint";
+        }
+    }
+
+    function refreshStatus() {
+        fetch("/api/status", { headers: { "Accept": "application/json" } })
+            .then(function (response) { return response.json(); })
+            .then(function (data) {
+                renderPlaylist(data.playlist);
+                renderKodi(data.kodi);
+                renderRefresh(data.refresh);
+                renderAlerts(data.alerts);
+                renderGroups(data.groups, data.selected);
+                var epg = document.getElementById("epg-url");
+                if (epg && document.activeElement !== epg) {
+                    epg.value = data.epg_url || "";
+                }
+            })
+            .catch(function () { /* keep the last values */ });
+    }
+
+    function postJson(url, payload) {
+        var options = { method: "POST" };
+        if (payload !== null) {
+            options.headers = { "Content-Type": "application/json" };
+            options.body = JSON.stringify(payload);
+        }
+        return fetch(url, options).then(function (response) {
+            return response.json().then(function (data) {
+                return { ok: response.ok && data.ok !== false, data: data };
+            });
+        });
+    }
+
+    function handleResult(result) {
+        setMessage(result.data.message || (result.ok ? "done" : "failed"), result.ok);
+        if (result.data.playlist) { renderPlaylist(result.data.playlist); }
+        if (result.data.kodi) { renderKodi(result.data.kodi); }
+        if (result.data.refresh) { renderRefresh(result.data.refresh); }
+        if (result.data.alerts) { renderAlerts(result.data.alerts); }
+        if (result.data.update) { renderUpdate(result.data.update); }
+        if (result.data.groups) {
+            renderGroups(result.data.groups, result.data.selected);
+        }
+        var epg = document.getElementById("epg-url");
+        if (epg && result.data.epg_url !== undefined
+                && document.activeElement !== epg) {
+            epg.value = result.data.epg_url || "";
+        }
+    }
+
+    function postForm(url, body) {
+        setBusy(true);
+        setMessage("working...", true);
+        fetch(url, { method: "POST", body: body })
+            .then(function (response) {
+                return response.json().then(function (data) {
+                    return { ok: response.ok && data.ok !== false, data: data };
+                });
+            })
+            .then(handleResult)
+            .catch(function (error) { setMessage("request failed: " + error, false); })
+            .then(function () { setBusy(false); });
+    }
+
+    function restartFlag() {
+        return document.getElementById("restart-kodi").checked ? "1" : "0";
+    }
+
+    document.getElementById("form-file").addEventListener("submit", function (event) {
+        event.preventDefault();
+        var form = event.target;
+        var input = form.querySelector("input[type=file]");
+        if (!input.files.length) {
+            setMessage("choose a playlist file first", false);
+            return;
+        }
+        var data = new FormData();
+        data.append("mode", "file");
+        data.append("restart", restartFlag());
+        data.append("file", input.files[0], input.files[0].name);
+        postForm("/api/playlist", data);
+    });
+
+    function formSubmit(formId) {
+        var form = document.getElementById(formId);
+        form.addEventListener("submit", function (event) {
+            event.preventDefault();
+            var data = new FormData(form);
+            data.append("restart", restartFlag());
+            postForm("/api/playlist", data);
+        });
+    }
+    formSubmit("form-paste");
+    formSubmit("form-url");
+
+    document.getElementById("groups-apply").addEventListener("click", function () {
+        var boxes = document.querySelectorAll(".group-checkbox");
+        var selected = [];
+        for (var i = 0; i < boxes.length; i++) {
+            if (boxes[i].checked) { selected.push(boxes[i].value); }
+        }
+        setBusy(true);
+        setMessage("applying groups...", true);
+        postJson("/api/groups", { groups: selected })
+            .then(handleResult)
+            .catch(function (error) { setMessage("request failed: " + error, false); })
+            .then(function () { setBusy(false); });
+    });
+
+    function setAllGroups(checked) {
+        var boxes = document.querySelectorAll(".group-checkbox");
+        for (var i = 0; i < boxes.length; i++) { boxes[i].checked = checked; }
+    }
+    document.getElementById("groups-all").addEventListener("click", function () {
+        setAllGroups(true);
+    });
+    document.getElementById("groups-none").addEventListener("click", function () {
+        setAllGroups(false);
+    });
+
+    document.getElementById("form-epg").addEventListener("submit", function (event) {
+        event.preventDefault();
+        var url = document.getElementById("epg-url").value;
+        setBusy(true);
+        setMessage("saving EPG URL...", true);
+        postJson("/api/epg", { url: url })
+            .then(handleResult)
+            .catch(function (error) { setMessage("request failed: " + error, false); })
+            .then(function () { setBusy(false); });
+    });
+
+    document.getElementById("health-reload").addEventListener("click", function () {
+        fetch("/api/health?fresh=1", { headers: { "Accept": "application/json" } })
+            .then(function (response) { return response.json(); })
+            .then(function (data) { renderHealth(data.health); })
+            .catch(function (error) { setMessage("request failed: " + error, false); });
+    });
+
+    document.getElementById("logs-reload").addEventListener("click", function () {
+        fetch("/api/logs", { headers: { "Accept": "application/json" } })
+            .then(function (response) { return response.json(); })
+            .then(renderLogs)
+            .catch(function (error) { setMessage("request failed: " + error, false); });
+    });
+
+    document.getElementById("form-update").addEventListener("submit", function (event) {
+        event.preventDefault();
+        var input = event.target.querySelector("input[type=file]");
+        if (!input.files.length) {
+            setMessage("choose an update file first", false);
+            return;
+        }
+        var data = new FormData();
+        data.append("file", input.files[0], input.files[0].name);
+        postForm("/api/update", data);
+    });
+
+    function startRaucInstall(data, note, onDone) {
+        var reboot = document.getElementById("rauc-reboot");
+        data.append("reboot", (reboot && reboot.checked) ? "1" : "0");
+        setBusy(true);
+        setMessage(note, true);
+        fetch("/api/rauc/install", { method: "POST", body: data })
+            .then(function (response) {
+                return response.json().then(function (body) {
+                    return { ok: response.ok && body.ok !== false, data: body };
+                });
+            })
+            .then(function (result) {
+                setMessage(result.data.message
+                    || (result.ok ? "install started" : "install not started"), result.ok);
+                if (result.data.rauc) { renderRauc(result.data.rauc); }
+                if (result.ok) { scheduleRaucPolling(true); }
+                if (onDone) { onDone(); }
+            })
+            .catch(function (error) {
+                setMessage("request failed: " + error, false);
+            })
+            .then(function () { setBusy(false); });
+    }
+
+    var formRauc = document.getElementById("form-rauc");
+    if (formRauc) {
+        formRauc.addEventListener("submit", function (event) {
+            event.preventDefault();
+            var input = event.target.querySelector("input[type=file]");
+            if (!input.files.length) {
+                setMessage("choose a .raucb bundle first", false);
+                return;
+            }
+            var data = new FormData();
+            data.append("bundle", input.files[0], input.files[0].name);
+            // Optional: only sent when the user pasted one, the box then
+            // refuses a bundle whose SHA-256 does not match.
+            var checksum = event.target.querySelector("input[name=sha256]");
+            var expected = checksum ? (checksum.value || "").trim() : "";
+            if (expected) { data.append("sha256", expected); }
+            startRaucInstall(data, "uploading the bundle...", function () {
+                input.value = "";
+                if (checksum) { checksum.value = ""; }
+            });
+        });
+    }
+
+    // Once the user toggled the history himself, polling stops opening or
+    // closing it for him.
+    if (raucHistoryFilter) {
+        raucHistoryFilter.addEventListener("change", paintRaucHistory);
+    }
+
+    // The problem counter doubles as the shortcut for the filter: one click
+    // turns it on, opens the block and stops polling from closing it again.
+    var raucProblemCount = document.getElementById("rauc-history-problems");
+    if (raucProblemCount) {
+        var useProblemFilter = function (event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            if (!raucHistoryFilter) { return; }
+            raucHistoryFilter.checked = true;
+            historyTouched = true;
+            paintRaucHistory();
+            if (raucHistoryBox) { raucHistoryBox.open = true; }
+        };
+        raucProblemCount.addEventListener("click", useProblemFilter);
+        raucProblemCount.addEventListener("keydown", function (event) {
+            if (event.key === "Enter" || event.key === " "
+                    || event.keyCode === 13 || event.keyCode === 32) {
+                useProblemFilter(event);
+            }
+        });
+    }
+
+    var raucHistoryBox = document.getElementById("rauc-history");
+    if (raucHistoryBox) {
+        var raucHistorySummary = raucHistoryBox.querySelector("summary");
+        if (raucHistorySummary) {
+            raucHistorySummary.addEventListener("click", function () {
+                historyTouched = true;
+            });
+        }
+    }
+
+    var raucRebootNow = document.getElementById("rauc-reboot-now");
+    if (raucRebootNow) {
+        raucRebootNow.addEventListener("click", function () {
+            if (!window.confirm("Reboot the box now? "
+                    + "Kodi stops and the next boot runs the installed slot.")) {
+                return;
+            }
+            setBusy(true);
+            setMessage("rebooting...", true);
+            postJson("/api/rauc/reboot", { confirm: "1" })
+                .then(function (result) {
+                    setMessage(result.data.message
+                        || (result.ok ? "rebooting" : "reboot refused"), result.ok);
+                    if (result.data.rauc) { renderRauc(result.data.rauc); }
+                })
+                .catch(function (error) {
+                    setMessage("request failed: " + error, false);
+                })
+                .then(function () { setBusy(false); });
+        });
+    }
+
+    var formRaucUrl = document.getElementById("form-rauc-url");
+    if (formRaucUrl) {
+        formRaucUrl.addEventListener("submit", function (event) {
+            event.preventDefault();
+            var field = event.target.querySelector("input[name=url]");
+            var url = (field.value || "").replace(/^\s+|\s+$/g, "");
+            if (!url) {
+                setMessage("enter the bundle URL first", false);
+                return;
+            }
+            if (!/^https?:\/\//i.test(url)) {
+                setMessage("the URL must start with http:// or https://", false);
+                return;
+            }
+            var data = new FormData();
+            data.append("url", url);
+            var checksum = event.target.querySelector("input[name=sha256]");
+            var expected = checksum ? (checksum.value || "").trim() : "";
+            if (expected) { data.append("sha256", expected); }
+            startRaucInstall(data, "asking the box to fetch the bundle...", function () {
+                field.value = "";
+                if (checksum) { checksum.value = ""; }
+            });
+        });
+    }
+
+    document.getElementById("form-notify").addEventListener("submit", function (event) {
+        event.preventDefault();
+        var url = document.getElementById("notify-url").value;
+        setBusy(true);
+        setMessage("saving the alert URL...", true);
+        postJson("/api/notify", { url: url })
+            .then(handleResult)
+            .catch(function (error) { setMessage("request failed: " + error, false); })
+            .then(function () { setBusy(false); });
+    });
+
+    document.getElementById("refresh-now").addEventListener("click", function () {
+        setBusy(true);
+        setMessage("refreshing the playlist from its URL...", true);
+        postJson("/api/refresh", null)
+            .then(handleResult)
+            .catch(function (error) { setMessage("request failed: " + error, false); })
+            .then(function () { setBusy(false); });
+    });
+
+    document.getElementById("restart-button").addEventListener("click", function () {
+        setBusy(true);
+        setMessage("restarting Kodi...", true);
+        postJson("/api/restart", null)
+            .then(handleResult)
+            .catch(function (error) { setMessage("request failed: " + error, false); })
+            .then(function () { setBusy(false); });
+    });
+
+    var statsTimer = null;
+    var statusTimer = null;
+
+    function startPolling() {
+        if (document.hidden) {
+            return;
+        }
+        refreshHardware();
+        refreshRauc();
+        if (statsTimer === null) {
+            statsTimer = window.setInterval(refreshHardware, 5000);
+        }
+        if (statusTimer === null) {
+            statusTimer = window.setInterval(refreshStatus, 20000);
+        }
+    }
+
+    function stopPolling() {
+        if (statsTimer !== null) {
+            window.clearInterval(statsTimer);
+            statsTimer = null;
+        }
+        if (statusTimer !== null) {
+            window.clearInterval(statusTimer);
+            statusTimer = null;
+        }
+        // The install progress timer keeps running in the background: it only
+        // matters while rauc is writing, and stops itself when it is done.
+        if (raucTimer !== null && raucTimer !== undefined) {
+            window.clearInterval(raucTimer);
+            raucTimer = null;
+        }
+    }
+
+    // Page Visibility API: only poll while this tab is in the foreground. A
+    // dashboard left open in a background tab must not wake the CPU, run
+    // vcgencmd or touch the SD card while the TV is playing.
+    document.addEventListener("visibilitychange", function () {
+        if (document.hidden) {
+            stopPolling();
+        } else {
+            startPolling();
+        }
+    });
+    startPolling();
+}());
+</script>
+</body>
+</html>

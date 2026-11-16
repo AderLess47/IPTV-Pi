@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<settings version="2">
+    <!-- pvr.iptvsimple 3.9.x / Kodi 18 (Leia) -->
+    <!-- m3uPathType: 0 = local file, 1 = remote URL -->
+    <setting id="m3uPathType" value="0" />
+    <setting id="m3uPath" value="/var/lib/iptv/playlist.m3u" />
+    <setting id="m3uCache" value="false" />
+    <setting id="startNum" value="1" />
+</settings>

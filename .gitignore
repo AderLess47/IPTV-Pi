@@ -1,0 +1,28 @@
+# Buildroot checkout (fetched by build_os.sh)
+/buildroot/
+buildroot-*/
+
+# Build output and download cache
+/output/
+/dl/
+
+# Build artifacts (images, update bundles, checksums)
+*.img
+*.raucb
+*.raucb.sha256
+*.ext4
+*.part
+
+# Python bytecode from local linting/tests
+__pycache__/
+*.pyc
+*.pyo
+
+# Test and coverage droppings
+.pytest_cache/
+.coverage
+tests/artifacts/
+
+# Local overrides
+*.local
+.env

@@ -1,0 +1,159 @@
+#!/bin/sh
+#
+# IPTV-Pi: RAUC custom bootloader backend.
+#
+# The Raspberry Pi firmware always loads the kernel from the FAT partition and
+# follows cmdline.txt, so the "bootloader state" is that file plus a few small
+# files in /boot/rauc. RAUC calls this script with:
+#
+#   get-primary                 print the slot to boot (A or B)
+#   set-primary <A|B>           make that slot the one to boot next
+#   get-state <A|B>             print good or bad
+#   set-state <A|B> <good|bad>  record a slot's boot result
+#   get-current                 print the slot we are running from
+#
+# Every command prints one line on stdout and exits 0 on success; anything else
+# makes RAUC treat the bootloader as broken, which is the safe direction.
+#
+set -eu
+
+BOOT_DIR="${IPTV_BOOT_DIR:-/boot}"
+CMDLINE="${BOOT_DIR}/cmdline.txt"
+STATE_DIR="${BOOT_DIR}/rauc"
+SLOTS_CONF="${IPTV_SLOTS_CONF:-/etc/iptv-slots.conf}"
+PROC_CMDLINE="${IPTV_PROC_CMDLINE:-/proc/cmdline}"
+
+fail() {
+    printf 'iptv-boot-slot: %s\n' "$*" >&2
+    exit 1
+}
+
+[ -r "$SLOTS_CONF" ] || fail "cannot read $SLOTS_CONF"
+. "$SLOTS_CONF"
+
+valid_slot() {
+    [ "$1" = "A" ] || [ "$1" = "B" ]
+}
+
+partuuid() {
+    case "$1" in
+        A) printf '%s' "${ROOTFS_A:-}" ;;
+        B) printf '%s' "${ROOTFS_B:-}" ;;
+        *) return 1 ;;
+    esac
+}
+
+slot_of_uuid() {
+    if [ -n "${ROOTFS_A:-}" ] && [ "$1" = "$ROOTFS_A" ]; then
+        printf 'A'
+        return 0
+    fi
+    if [ -n "${ROOTFS_B:-}" ] && [ "$1" = "$ROOTFS_B" ]; then
+        printf 'B'
+        return 0
+    fi
+    return 1
+}
+
+current_from_cmdline() {
+    [ -r "$PROC_CMDLINE" ] || return 1
+    for word in $(cat "$PROC_CMDLINE"); do
+        case "$word" in
+            rauc.slot=*)
+                printf '%s' "${word#rauc.slot=}"
+                return 0
+                ;;
+            root=PARTUUID=*)
+                slot_of_uuid "${word#root=PARTUUID=}" && return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
+# /boot is mounted read-only (see /etc/fstab): an interrupted FAT write on a
+# power cut can cost the bootloader. The few bytes this backend changes are
+# written with the partition remounted read-write, synced and put back on exit.
+boot_writable() {
+    if mount -o remount,rw "$BOOT_DIR" >/dev/null 2>&1; then
+        trap 'sync; mount -o remount,ro "$BOOT_DIR" >/dev/null 2>&1 || true' EXIT
+        trap 'exit 1' INT TERM HUP
+    fi
+}
+
+primary() {
+    if [ -r "${STATE_DIR}/primary" ]; then
+        recorded="$(cat "${STATE_DIR}/primary")"
+        if valid_slot "$recorded"; then
+            printf '%s' "$recorded"
+            return 0
+        fi
+    fi
+    current_from_cmdline
+}
+
+write_primary() {
+    slot="$1"
+    uuid="$(partuuid "$slot")" || fail "unknown slot $slot"
+    [ -n "$uuid" ] || fail "no partition UUID configured for slot $slot"
+    [ -f "$CMDLINE" ] || fail "$CMDLINE does not exist"
+    boot_writable
+    [ -w "$CMDLINE" ] || fail "$CMDLINE is not writable"
+    mkdir -p "$STATE_DIR"
+    tmp="${CMDLINE}.new"
+    sed -e 's/ *rauc\.slot=[^ ]*//g' -e "s#root=[^ ]*#root=PARTUUID=${uuid}#" \
+        "$CMDLINE" | tr -d '\n' > "$tmp"
+    # panic=10 makes the kernel reboot instead of hanging on a panic; it is
+    # re-added here in case the command line was edited by hand.
+    grep -q 'panic=' "$tmp" || printf ' panic=10' >> "$tmp"
+    printf ' rauc.slot=%s\n' "$slot" >> "$tmp"
+    mv -f "$tmp" "$CMDLINE"
+
+    # Keep a plain record as well; it is what get-primary reports even if the
+    # kernel command line was edited by hand.
+    printf '%s\n' "$slot" > "${STATE_DIR}/primary"
+}
+
+command="${1:-}"
+if [ $# -gt 0 ]; then
+    shift
+fi
+
+case "$command" in
+    get-primary)
+        slot="$(primary)" || fail "no primary slot recorded"
+        printf '%s\n' "$slot"
+        ;;
+    set-primary)
+        [ $# -ge 1 ] || fail "set-primary needs a slot name"
+        valid_slot "$1" || fail "unknown slot '$1'"
+        write_primary "$1"
+        ;;
+    get-state)
+        [ $# -ge 1 ] || fail "get-state needs a slot name"
+        valid_slot "$1" || fail "unknown slot '$1'"
+        state="good"
+        if [ -r "${STATE_DIR}/state-$1" ]; then
+            state="$(cat "${STATE_DIR}/state-$1")"
+        fi
+        printf '%s\n' "$state"
+        ;;
+    set-state)
+        [ $# -ge 2 ] || fail "set-state needs a slot name and a state"
+        valid_slot "$1" || fail "unknown slot '$1'"
+        case "$2" in
+            good|bad) ;;
+            *) fail "unknown state '$2'" ;;
+        esac
+        boot_writable
+        mkdir -p "$STATE_DIR"
+        printf '%s\n' "$2" > "${STATE_DIR}/state-$1"
+        ;;
+    get-current)
+        slot="$(current_from_cmdline)" || fail "no rauc.slot on the kernel command line"
+        printf '%s\n' "$slot"
+        ;;
+    *)
+        fail "unknown command '${command}'"
+        ;;
+esac

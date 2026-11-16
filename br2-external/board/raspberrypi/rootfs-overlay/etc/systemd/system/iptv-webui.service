@@ -1,0 +1,43 @@
+[Unit]
+Description=IPTV-Pi playlist web interface
+Documentation=http://<board-ip>/
+After=network.target iptv-data-init.service
+Wants=network.target
+# The playlist, state and logs live on the data partition.
+RequiresMountsFor=/var/lib/iptv
+# After Restart= gives up, report the failure through the alert webhook.
+OnFailure=iptv-unit-alert@%n.service
+
+[Service]
+Type=simple
+# Runs as root on purpose: it must write /var/lib/iptv/playlist.m3u and call
+# systemctl restart kodi. The interface is meant for a trusted LAN only.
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+# -OO: strip docstrings and asserts (smaller heap, nothing to write back to
+# the SD card). The playlist itself is streamed, never buffered.
+Environment=PYTHONOPTIMIZE=2
+# Uploads and downloads are spooled here, on the data partition: /tmp is a
+# 32 MB tmpfs and a real rootfs bundle is 150-350 MB, so spooling into /tmp
+# would fail (or be dropped on the floor by MemoryMax). launch.sh creates the
+# directory and cleans leftovers, app.py hands it to tempfile.
+Environment=TMPDIR=/var/lib/iptv/updates/tmp
+Environment=IPTV_PLAYLIST=/var/lib/iptv/playlist.m3u
+Environment=IPTV_KODI_UNIT=kodi.service
+Environment=IPTV_WEBUI_BIND=0.0.0.0
+Environment=IPTV_WEBUI_PORT=80
+# launch.sh picks the interpreter that actually has Flask (Buildroot's
+# Flask package follows the image's default Python).
+ExecStart=/usr/share/iptv-webui/launch.sh
+Restart=always
+RestartSec=5
+# The web UI is a background helper: lowest CPU priority, idle I/O class and
+# a cgroup memory cap so a runaway upload cannot starve Kodi.
+Nice=19
+IOSchedulingClass=idle
+MemoryAccounting=yes
+MemoryHigh=48M
+MemoryMax=96M
+
+[Install]
+WantedBy=multi-user.target

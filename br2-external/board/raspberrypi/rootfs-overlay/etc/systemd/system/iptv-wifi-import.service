@@ -1,0 +1,15 @@
+[Unit]
+Description=Import Wi-Fi credentials from /boot/wifi.txt
+Documentation=file:/usr/bin/iptv-wifi-import
+# The boot partition must be mounted first (see /etc/fstab).
+After=local-fs.target
+Wants=local-fs.target
+ConditionPathExists=/boot/wifi.txt
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/usr/bin/iptv-wifi-import
+
+[Install]
+WantedBy=multi-user.target

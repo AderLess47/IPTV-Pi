@@ -1,0 +1,4 @@
+#EXTM3U
+# This is the placeholder playlist shipped with IPTV-Pi.
+# Replace it from the web interface (http://<board-ip>/) by pasting an M3U
+# playlist, uploading a file, or pointing IPTV-Pi at a playlist URL.

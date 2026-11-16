@@ -1,0 +1,20 @@
+[Unit]
+Description=IPTV-Pi: report failed unit %i to the alert webhook
+Documentation=file:/usr/share/iptv-webui/app.py
+
+[Service]
+Type=oneshot
+RequiresMountsFor=/var/lib/iptv
+# Instantiated by OnFailure= in kodi.service and iptv-webui.service. The
+# instance name is the failed unit, so `%i` is e.g. "kodi.service". Repeated
+# failures are rate limited in the app itself (one alert per unit per window).
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONOPTIMIZE=2
+Environment=IPTV_PLAYLIST=/var/lib/iptv/playlist.m3u
+ExecStart=/usr/share/iptv-webui/launch.sh --alert-unit %i
+Nice=19
+IOSchedulingClass=idle
+MemoryAccounting=yes
+MemoryMax=32M
+TimeoutStartSec=2min

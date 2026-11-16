@@ -1,0 +1,36 @@
+#!/bin/sh
+#
+# IPTV-Pi: mark the running slot good, with /boot writable for the moment it
+# takes.
+#
+# RAUC records the result through its bootloader backend (iptv-boot-slot
+# set-state), which writes into /boot/rauc. /boot is mounted read-only against
+# power-loss corruption of the FAT filesystem, so the window is opened here,
+# synced and closed again on exit — also when rauc fails.
+#
+# Run by iptv-rauc-mark-good.service; "already marked as good" exits non-zero,
+# which the unit prefixes with "-" because it is not a failure.
+
+set -u
+
+BOOT_DIR="${IPTV_BOOT_DIR:-/boot}"
+RAUC="${IPTV_RAUC:-/usr/bin/rauc}"
+
+remount() {
+    mount -o "remount,$1" "$BOOT_DIR" >/dev/null 2>&1 || true
+}
+
+if [ -d "$BOOT_DIR" ] && mount -o remount,rw "$BOOT_DIR" >/dev/null 2>&1; then
+    trap 'sync; remount ro' EXIT
+    trap 'exit 1' INT TERM HUP
+fi
+
+if [ ! -x "$RAUC" ]; then
+    echo "iptv-rauc-mark-good: $RAUC is missing" >&2
+    exit 1
+fi
+
+"$RAUC" status mark-good
+rc=$?
+sync
+exit $rc

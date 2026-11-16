@@ -1,0 +1,14 @@
+[Unit]
+Description=IPTV-Pi system health watchdog (every 10 min)
+Documentation=file:/usr/share/iptv-webui/app.py
+
+[Timer]
+# First check two minutes after boot (failed units are known by then), then
+# every ten minutes with a little slack.
+OnBootSec=2min
+OnUnitActiveSec=10min
+AccuracySec=1min
+Unit=iptv-health-watch.service
+
+[Install]
+WantedBy=timers.target
