@@ -235,9 +235,12 @@ else
     rm -rf "${BUNDLE_DIR}"
     mkdir -p "${BUNDLE_DIR}"
     cp -f "${BINARIES_DIR}/rootfs.ext4" "${BUNDLE_DIR}/rootfs.ext4"
+    # The compatible names the board (post-build.sh writes the same string into
+    # /etc/rauc/system.conf): RAUC refuses a bundle built for the other board
+    # instead of writing an ARMv7 rootfs onto the ARMv6 Pi 1.
     cat > "${BUNDLE_DIR}/manifest.raucm" <<EOF
 [update]
-compatible=iptvpi
+compatible=iptvpi-${BOARD}
 version=${VERSION}
 
 [bundle]

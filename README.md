@@ -122,7 +122,7 @@ different design with a much larger memory footprint.
 │           ├── etc/systemd/system/iptv-unit-alert@.service
 │           ├── etc/fstab                       # noatime root + data + tmpfs /tmp, /var/log
 │           ├── etc/iptv-slots.conf             # PARTUUIDs of rootfs slot A and B
-│           ├── etc/rauc/system.conf            # compatible=iptvpi, two rootfs slots
+│           ├── etc/rauc/system.conf            # compatible=iptvpi-pi1/-pi2, two slots
 │           ├── etc/systemd/system/iptv-data-init.service
 │           ├── etc/systemd/system/iptv-rauc-mark-good.service
 │           ├── usr/bin/iptv-zram-setup
@@ -291,7 +291,10 @@ The Raspberry Pi firmware has no A/B logic — it always loads the kernel from
 the FAT partition and follows `cmdline.txt` — so the box uses RAUC's
 **custom bootloader backend**:
 
-* `compatible=iptvpi`, `bootloader=custom`,
+* `compatible=iptvpi-pi1` / `iptvpi-pi2` — written per board by `post-build.sh`
+  and mirrored in the bundle manifest, so RAUC refuses a bundle built for the
+  other board before a slot is touched instead of writing an ARMv7 rootfs onto
+  the ARMv6 Pi 1 — `bootloader=custom`,
   `bootloader-custom-backend=iptv-boot-slot` (`/etc/rauc/system.conf`);
 * `/usr/bin/iptv-boot-slot` answers `get-primary`, `set-primary <A|B>`,
   `get-state`, `set-state <A|B> good|bad` and `get-current`; it rewrites
@@ -1171,7 +1174,7 @@ Verified locally while writing this project:
   `data.ext4`; the staged `cmdline.txt` is exactly one line with
   `root=PARTUUID=49505456-02`, the original options and `rauc.slot=A`;
   `mke2fs -L iptv-data` is called; the bundle manifest contains
-  `compatible=iptvpi`, the version, `format=plain` and
+  `compatible=iptvpi-pi1`, the version, `format=plain` and
   `filename=rootfs.ext4`, and `rauc bundle` is invoked with the certificate and
   key. A rootfs larger than a slot fails the build with a message naming the
   sizes, and a missing key still produces the card image and only skips the

@@ -391,7 +391,8 @@ def test_post_image():
 
     bundle = os.path.join(tmp, "build/iptvpi-bundle")
     manifest = read(os.path.join(bundle, "manifest.raucm"))
-    check("compatible=iptvpi" in manifest, "the bundle is compatible=iptvpi")
+    check("compatible=iptvpi-pi1" in manifest,
+          "the bundle manifest names the board in its compatible string")
     check("version=1.2.3" in manifest, "the bundle carries the version")
     check("format=plain" in manifest, "the bundle uses the plain format")
     check("[image.rootfs]" in manifest and "filename=rootfs.ext4" in manifest,
@@ -507,7 +508,53 @@ def test_shared_rauc_key():
 
 
 # --------------------------------------------------------------------------
-# 4. iptv-rauc-mark-good (the read-write window around rauc)
+# 4. board specific compatible string (a Pi 2 bundle must not fit a Pi 1)
+# --------------------------------------------------------------------------
+def test_board_compatible():
+    """RAUC compares only the compatible string, so it has to name the board:
+    an ARMv7 rootfs on the ARMv6 Pi 1 boots into nothing."""
+    if which("openssl") is None:
+        check(True, "openssl is not installed, the compatible test is skipped")
+        return
+
+    tmp = tempfile.mkdtemp(prefix="iptv-compatible-")
+    env = dict(os.environ)
+    env["IPTVPI_RAUC_KEYDIR"] = os.path.join(tmp, "keys")
+    for name in ("IPTVPI_RAUC_CERT", "IPTVPI_RAUC_KEY", "IPTVPI_ROOT_PASSWORD"):
+        env.pop(name, None)
+    template = read(os.path.join(OVERLAY, "etc/rauc/system.conf"))
+
+    def build(board):
+        binaries = os.path.join(tmp, board, "binaries")
+        target = os.path.join(tmp, board, "target")
+        os.makedirs(os.path.join(target, "etc/rauc"))
+        os.makedirs(binaries)
+        with open(os.path.join(target, "etc/rauc/system.conf"), "w") as fh:
+            fh.write(template)
+        run_env = dict(env)
+        run_env["BINARIES_DIR"] = binaries
+        run_env["IPTVPI_BOARD"] = board
+        rc, out, err = run(["bash", os.path.join(BOARD, "post-build.sh"), target],
+                           env=run_env)
+        return rc, out, err, read(os.path.join(target, "etc/rauc/system.conf"))
+
+    for board in ("pi1", "pi2"):
+        rc, out, err, conf = build(board)
+        check(rc == 0, "post-build runs for %s (%s)" % (board, err.strip()[-300:]))
+        check("compatible=iptvpi-%s\n" % board in conf,
+              "the %s image declares compatible=iptvpi-%s" % (board, board))
+        check("compatible=iptvpi\n" not in conf,
+              "the board neutral compatible is gone for %s" % board)
+        check("RAUC compatible string: iptvpi-%s" % board in out,
+              "the build logs the compatible it wrote for %s" % board)
+        check("[slot.rootfs.0]" in conf and "bootname=A" in conf,
+              "the slot configuration survives the rewrite for %s" % board)
+
+    shutil.rmtree(tmp)
+
+
+# --------------------------------------------------------------------------
+# 5. iptv-rauc-mark-good (the read-write window around rauc)
 # --------------------------------------------------------------------------
 def test_mark_good():
     helper = os.path.join(OVERLAY, "usr/bin/iptv-rauc-mark-good")
@@ -576,6 +623,8 @@ def test_static():
     system_conf = read(os.path.join(OVERLAY, "etc/rauc/system.conf"))
     check("[system]" in system_conf and "compatible=iptvpi" in system_conf,
           "system.conf declares the iptvpi compatible")
+    check("rewritten per board by post-build.sh" in system_conf,
+          "system.conf documents that the compatible is board specific")
     check("bootloader=custom" in system_conf, "system.conf uses the custom bootloader")
     check("bootloader-custom-backend=iptv-boot-slot" in system_conf,
           "system.conf points at iptv-boot-slot")
@@ -751,7 +800,8 @@ def test_static():
     check('DATA_SIZE="${IPTVPI_DATA_SIZE:-1024M}"' in post_image,
           "the data size is overridable")
     check("iptvpi-${VERSION}.raucb" in post_image, "the bundle name follows the version")
-    check("compatible=iptvpi" in post_image, "the bundle manifest is written")
+    check("compatible=iptvpi-${BOARD}" in post_image,
+          "the bundle manifest names the board it was built for")
 
     for board in ("iptvpi1", "iptvpi2"):
         cfg = read(os.path.join(ROOT, "br2-external/configs/%s_defconfig" % board))
@@ -776,6 +826,7 @@ def main():
     test_boot_slot()
     test_data_init()
     test_shared_rauc_key()
+    test_board_compatible()
     test_post_image()
     test_mark_good()
     test_static()

@@ -115,7 +115,8 @@ ausgelieferten Markup.
   `iptv-rauc-mark-good` und `iptv-wifi-import` öffnen ein kurzes
   `remount,rw`-Fenster, `sync`en und schließen es im `EXIT`-Trap wieder.
 * **Updates:** RAUC 1.5.1 mit eigenem Bootloader-Backend, Zertifikat
-  `/etc/rauc/ca.cert.pem`, `format=plain`, Bundle
+  `/etc/rauc/ca.cert.pem`, `compatible=iptvpi-pi1`/`iptvpi-pi2` (pro Board
+  geschrieben, im Bundle-Manifest identisch), `format=plain`, Bundle
   `iptvpi-<version>.raucb` **plus** `.sha256`; `iptv-rauc-mark-good.service`
   ruft den neuen Helper `/usr/bin/iptv-rauc-mark-good`. Das
   Signaturschlüsselpaar liegt außerhalb von `output/` (`IPTVPI_RAUC_KEYDIR`,

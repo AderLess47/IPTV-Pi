@@ -133,7 +133,49 @@ chmod 0755 "${TARGET_DIR}/usr/bin/iptv-data-init" 2>/dev/null || true
 chmod 0755 "${TARGET_DIR}/usr/bin/iptv-rauc-mark-good" 2>/dev/null || true
 
 # --------------------------------------------------------------------------
-# 6. RAUC signing material (A/B system updates)
+# 6. Board specific RAUC compatible string
+# --------------------------------------------------------------------------
+# Both boards share this overlay, but they are not interchangeable: the Pi 2
+# image is ARMv7 and does not run on the ARMv6 Pi 1. RAUC compares only the
+# compatible string before it writes a slot, so that string has to name the
+# board. Without it a Pi 2 bundle would be accepted on a Pi 1 and the box would
+# only notice after the reboot, with a rootfs that cannot boot.
+detect_board() {
+    if [ -n "${IPTVPI_BOARD:-}" ]; then
+        printf '%s\n' "${IPTVPI_BOARD}"
+        return
+    fi
+    if [ -n "${BR2_CONFIG:-}" ] && [ -f "${BR2_CONFIG}" ] \
+        && grep -qs '^BR2_cortex_a7=y' "${BR2_CONFIG}"; then
+        printf 'pi2\n'
+        return
+    fi
+    if [ -f "${BINARIES_DIR}/bcm2709-rpi-2-b.dtb" ]; then
+        printf 'pi2\n'
+        return
+    fi
+    printf 'pi1\n'
+}
+
+BOARD="$(detect_board)"
+case "${BOARD}" in
+    pi1|pi2) ;;
+    *)
+        echo "iptv-pi: unknown board '${BOARD}' (expected pi1 or pi2)" >&2
+        exit 1
+        ;;
+esac
+
+RAUC_SYSTEM_CONF="${TARGET_DIR}/etc/rauc/system.conf"
+if [ -f "${RAUC_SYSTEM_CONF}" ]; then
+    sed -i "s/^compatible[[:space:]]*=.*/compatible=iptvpi-${BOARD}/" "${RAUC_SYSTEM_CONF}"
+    log "RAUC compatible string: iptvpi-${BOARD}"
+else
+    warn "etc/rauc/system.conf is missing from the image"
+fi
+
+# --------------------------------------------------------------------------
+# 7. RAUC signing material (A/B system updates)
 # --------------------------------------------------------------------------
 # The private key never enters the image: it stays outside the target tree and
 # is used by post-image.sh to sign the bundle. Only the certificate becomes the
@@ -211,7 +253,7 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# 7. Optional: set a root password from the environment
+# 8. Optional: set a root password from the environment
 # --------------------------------------------------------------------------
 # build_os.sh exports IPTVPI_ROOT_PASSWORD if the user asked for one, so that
 # no default password ever ends up in this repository.
