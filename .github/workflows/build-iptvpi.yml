@@ -65,9 +65,13 @@ jobs:
   build-images:
     name: build image (${{ matrix.board }})
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    # Buildroot 2021.02 brings GCC 10 and expects a 2019/2020-era host; the
-    # 22.04 image (GCC 11, glibc 2.35) is the closest runner that still exists.
+    # Buildroot 2021.02 ships Python 2.7.18 for its host tools, and that Python
+    # cannot build its ssl module against OpenSSL 3 - on the 22.04 runner the
+    # resulting setuptools build aborts with SIGABRT. The job therefore runs in
+    # debian:bullseye, which has the OpenSSL 1.1.1 and GCC 10 of that era.
     runs-on: ubuntu-22.04
+    container:
+      image: debian:bullseye
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -78,30 +82,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Free disk space on the runner
-        # A Buildroot tree plus downloads and output is far more than the
-        # default ~14 GB of free space, so the preinstalled toolchains go.
-        run: |
-          sudo rm -rf \
-            /usr/share/dotnet \
-            /usr/local/lib/android \
-            /usr/local/share/boost \
-            /opt/ghc \
-            /opt/hostedtoolcache/CodeQL \
-            /usr/local/lib/node_modules \
-            "$AGENT_TOOLSDIRECTORY" || true
-          sudo apt-get clean
-          df -h /
-
       - name: Install host build dependencies
+        # The job runs inside the container, so there is no sudo and no runner
+        # toolchain to remove: the image is the build host.
         run: |
-          sudo apt-get update
+          apt-get update
           # kodi's configure step runs ./autogen.sh (and its bundled cpluff
           # does too) once the patches touch the build files, so the autotools
           # have to be on the host. autopoint is its own package since Ubuntu
           # 12.04 and gettext only suggests it - with --no-install-recommends
           # it is NOT pulled in, which is exactly what failed twice.
-          sudo apt-get install -y --no-install-recommends \
+          apt-get install -y --no-install-recommends \
             build-essential bison flex libncurses-dev libssl-dev \
             gettext autopoint autoconf automake libtool pkg-config gperf gdb \
             bc bzip2 cpio file git patch perl rsync sed tar unzip wget \

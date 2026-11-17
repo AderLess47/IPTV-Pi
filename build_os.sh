@@ -264,6 +264,23 @@ build_board() {
             die "Buildroot's host python does not run on this host"
         fi
         "${hostpy}" -c 'import sys; print("host python %s" % sys.version.split()[0])'
+        # The interpreter starts but setuptools' setup.py aborts on some hosts,
+        # so probe the imports it needs one by one: the first failing probe
+        # names the module, and gdb turns the silent abort into a backtrace.
+        for probe in 'import sys' 'import distutils' 'import sysconfig' \
+                     'import zlib' 'import hashlib' 'import ssl' 'import ctypes' \
+                     'import sqlite3' 'import ctypes.util'; do
+            if "${hostpy}" -c "${probe}" >/dev/null 2>&1; then
+                log "host python ok: ${probe}"
+                continue
+            fi
+            warn "host python probe failed: ${probe}"
+            ldd "${hostpy}" || true
+            if command -v gdb >/dev/null 2>&1; then
+                gdb -batch -ex run -ex bt --args "${hostpy}" -c "${probe}" || true
+            fi
+            die "Buildroot's host python is broken on this host (${probe})"
+        done
         log "building host-python-setuptools (smoke test)"
         make -C "${BUILDROOT_DIR}" \
             O="${out}" \
@@ -271,7 +288,13 @@ build_board() {
             BR2_DL_DIR="${DL_DIR}" \
             host-python-setuptools \
             -j"${JOBS}"
-        "${hostpy}" -c 'import setuptools, sys; print("setuptools %s on Python %s" % (setuptools.__version__, sys.version.split()[0]))'
+        "${hostpy}" -c 'import setuptools, sys; print("setuptools %s on Python %s" % (setuptools.__version__, sys.version.split()[0]))' || {
+            warn "importing setuptools aborts; backtrace follows"
+            if command -v gdb >/dev/null 2>&1; then
+                gdb -batch -ex run -ex bt --args "${hostpy}" -c 'import setuptools' || true
+            fi
+            die "setuptools does not import with Buildroot's host python"
+        }
         log "host python smoke test passed: ${hostpy}"
         return 0
     fi
