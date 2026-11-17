@@ -127,9 +127,14 @@ jobs:
           restore-keys: |
             buildroot-dl-
 
+      - name: Smoke-test Buildroot's host python
+        # Buildroot's own host python is the first thing that runs on the
+        # builder; building just that pair takes minutes, the full image takes
+        # hours, so a broken host toolchain is reported long before Kodi.
+        run: ./build_os.sh ${{ matrix.board }} --host-tools-only
+
       - name: Build the ${{ matrix.board }} image
         run: ./build_os.sh ${{ matrix.board }}
-
       - name: Collect sdcard.img, bundle and checksum
         run: |
           set -e

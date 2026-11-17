@@ -29,6 +29,7 @@ BOARDS=()
 JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
 DO_CLEAN=0
 DO_MENUCONFIG=0
+DO_HOST_TOOLS_ONLY=0
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m==>\033[0m warning: %s\n' "$*" >&2; }
@@ -46,6 +47,8 @@ Options:
       --clean             Remove the board's output directory first
       --menuconfig        Open menuconfig and save the result back to the
                           defconfig instead of building
+      --host-tools-only   Build Buildroot's host python and stop; a minutes
+                          long smoke test before the hours long image build
   -h, --help              Show this help
 
 Environment:
@@ -91,6 +94,10 @@ while [ $# -gt 0 ]; do
             ;;
         --menuconfig)
             DO_MENUCONFIG=1
+            shift
+            ;;
+        --host-tools-only)
+            DO_HOST_TOOLS_ONLY=1
             shift
             ;;
         -h|--help)
@@ -229,6 +236,29 @@ build_board() {
         log "saving the modified configuration back to br2-external/configs/${defconfig}"
         make -C "${BUILDROOT_DIR}" O="${out}" BR2_EXTERNAL="${EXTERNAL_DIR}" \
             BR2_DEFCONFIG="${EXTERNAL_DIR}/configs/${defconfig}" savedefconfig
+        return 0
+    fi
+
+    if [ "${DO_HOST_TOOLS_ONLY}" -eq 1 ]; then
+        # The image build runs Buildroot's own host python first. Building just
+        # that pair turns a broken host toolchain into a minutes long failure
+        # instead of one that shows up hours into the Kodi build.
+        log "building Buildroot's host python for ${board} (smoke test)"
+        make -C "${BUILDROOT_DIR}" \
+            O="${out}" \
+            BR2_EXTERNAL="${EXTERNAL_DIR}" \
+            BR2_DL_DIR="${DL_DIR}" \
+            host-python host-python-setuptools \
+            -j"${JOBS}"
+        local hostpy="${out}/host/bin/python2"
+        if ! "${hostpy}" -V; then
+            warn "${hostpy} does not start; collecting details"
+            ldd "${hostpy}" || true
+            PYTHONVERBOSE=1 "${hostpy}" -V || true
+            die "Buildroot's host python does not run on this host"
+        fi
+        "${hostpy}" -c 'import setuptools, sys; print("setuptools %s on Python %s" % (setuptools.__version__, sys.version.split()[0]))'
+        log "host python smoke test passed: ${hostpy}"
         return 0
     fi
 
