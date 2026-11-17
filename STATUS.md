@@ -117,7 +117,11 @@ ausgelieferten Markup.
 * **Updates:** RAUC 1.5.1 mit eigenem Bootloader-Backend, Zertifikat
   `/etc/rauc/ca.cert.pem`, `format=plain`, Bundle
   `iptvpi-<version>.raucb` **plus** `.sha256`; `iptv-rauc-mark-good.service`
-  ruft den neuen Helper `/usr/bin/iptv-rauc-mark-good`.
+  ruft den neuen Helper `/usr/bin/iptv-rauc-mark-good`. Das
+  Signaturschlüsselpaar liegt außerhalb von `output/` (`IPTVPI_RAUC_KEYDIR`,
+  Standard `~/.cache/iptvpi-rauc`; in CI der Actions-Cache) und wird von jedem
+  Build wiederverwendet, damit Bundles aus späteren Releases auf bereits
+  geflashten Boxen installierbar bleiben.
 * **Datenhaltung:** Playlist, State, Logs, Update-Dateien, Spool-Verzeichnis und
   Kodi-Profil (`/var/kodi` → `/var/lib/iptv/kodi`) liegen auf p4 und überleben
   einen Slot-Tausch; Seeding einmalig via `iptv-data-init`.

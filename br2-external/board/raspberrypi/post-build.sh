@@ -135,14 +135,25 @@ chmod 0755 "${TARGET_DIR}/usr/bin/iptv-rauc-mark-good" 2>/dev/null || true
 # --------------------------------------------------------------------------
 # 6. RAUC signing material (A/B system updates)
 # --------------------------------------------------------------------------
-# The private key never enters the image: it stays in binaries/rauc and is used
-# by post-image.sh to sign the bundle. Only the certificate becomes the target
-# keyring (/etc/rauc/ca.cert.pem), so a bundle signed with anything else is
-# rejected by the box. IPTVPI_RAUC_CERT/IPTVPI_RAUC_KEY let a real key replace
-# the generated development one.
+# The private key never enters the image: it stays outside the target tree and
+# is used by post-image.sh to sign the bundle. Only the certificate becomes the
+# target keyring (/etc/rauc/ca.cert.pem), so a bundle signed with anything else
+# is rejected by the box.
+#
+# The pair has to be the same for every build. An image trusts exactly the
+# certificate it was built with, so a key generated per build (per board, per
+# run) would make a bundle from a later release impossible to install on an
+# already flashed box. It therefore lives outside output/ and is reused:
+#
+#   1. IPTVPI_RAUC_CERT + IPTVPI_RAUC_KEY   explicit files, e.g. a production key
+#   2. IPTVPI_RAUC_KEYDIR                   default ${HOME}/.cache/iptvpi-rauc
+#   3. a pair already in binaries/rauc       adopted into the key directory
+#
+# Only when none of the three exists is a new development key generated.
 RAUC_DIR="${BINARIES_DIR}/rauc"
 RAUC_CERT="${RAUC_DIR}/ca.cert.pem"
 RAUC_KEY="${RAUC_DIR}/ca.key.pem"
+RAUC_KEYDIR="${IPTVPI_RAUC_KEYDIR:-${HOME:-/root}/.cache/iptvpi-rauc}"
 
 install -d -m 0755 "${RAUC_DIR}" "${TARGET_DIR}/etc/rauc"
 
@@ -152,18 +163,38 @@ elif [ -n "${IPTVPI_RAUC_CERT:-}" ] && [ -n "${IPTVPI_RAUC_KEY:-}" ]; then
     log "using the RAUC key material from IPTVPI_RAUC_CERT/IPTVPI_RAUC_KEY"
     install -m 0644 "${IPTVPI_RAUC_CERT}" "${RAUC_CERT}"
     install -m 0600 "${IPTVPI_RAUC_KEY}" "${RAUC_KEY}"
-elif [ ! -f "${RAUC_CERT}" ] || [ ! -f "${RAUC_KEY}" ]; then
-    log "generating a development RAUC signing key (fine for testing, replace for production)"
-    openssl req -x509 -newkey rsa:4096 -nodes -days 3650 \
-        -subj "/CN=IPTV-Pi development signing key" \
-        -keyout "${RAUC_KEY}" -out "${RAUC_CERT}" >/dev/null 2>&1
-    chmod 0600 "${RAUC_KEY}"
 else
-    log "reusing the RAUC key already in ${RAUC_DIR}"
+    if [ -n "${IPTVPI_RAUC_CERT:-}" ] || [ -n "${IPTVPI_RAUC_KEY:-}" ]; then
+        warn "IPTVPI_RAUC_CERT and IPTVPI_RAUC_KEY must be set together, using ${RAUC_KEYDIR}"
+    fi
+    install -d -m 0700 "${RAUC_KEYDIR}"
+    if [ -f "${RAUC_KEYDIR}/ca.cert.pem" ] && [ -f "${RAUC_KEYDIR}/ca.key.pem" ]; then
+        log "reusing the RAUC signing key from ${RAUC_KEYDIR}"
+    elif [ -f "${RAUC_CERT}" ] && [ -f "${RAUC_KEY}" ]; then
+        log "adopting the RAUC signing key already in ${RAUC_DIR}"
+        install -m 0644 "${RAUC_CERT}" "${RAUC_KEYDIR}/ca.cert.pem"
+        install -m 0600 "${RAUC_KEY}" "${RAUC_KEYDIR}/ca.key.pem"
+    else
+        log "generating a RAUC development signing key in ${RAUC_KEYDIR}"
+        log "every build reuses it; pass IPTVPI_RAUC_CERT/IPTVPI_RAUC_KEY for a production key"
+        openssl req -x509 -newkey rsa:4096 -nodes -days 3650 \
+            -subj "/CN=IPTV-Pi development signing key" \
+            -keyout "${RAUC_KEYDIR}/ca.key.pem" \
+            -out "${RAUC_KEYDIR}/ca.cert.pem" >/dev/null 2>&1
+        chmod 0600 "${RAUC_KEYDIR}/ca.key.pem"
+    fi
+    install -m 0644 "${RAUC_KEYDIR}/ca.cert.pem" "${RAUC_CERT}"
+    install -m 0600 "${RAUC_KEYDIR}/ca.key.pem" "${RAUC_KEY}"
 fi
 
 if [ -f "${RAUC_CERT}" ]; then
     install -m 0644 "${RAUC_CERT}" "${TARGET_DIR}/etc/rauc/ca.cert.pem"
+    # A key that changes between builds silently breaks updates for every box
+    # that is already flashed, so its fingerprint always shows up in the log.
+    cert_fp="$(openssl x509 -in "${RAUC_CERT}" -noout -fingerprint -sha256 2>/dev/null | sed 's/^.*=//' || true)"
+    if [ -n "${cert_fp}" ]; then
+        log "RAUC signing certificate (SHA-256): ${cert_fp}"
+    fi
 fi
 
 # The slot UUIDs used by iptv-boot-slot and RAUC's system.conf come from a

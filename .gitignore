@@ -23,6 +23,9 @@ __pycache__/
 .coverage
 tests/artifacts/
 
+# RAUC signing pair handed to the build jobs by CI
+/rauc-keys/
+
 # Local overrides
 *.local
 .env

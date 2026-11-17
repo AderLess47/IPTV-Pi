@@ -435,6 +435,78 @@ def test_post_image():
 
 
 # --------------------------------------------------------------------------
+# 4. post-build.sh keeps one signing key across builds
+# --------------------------------------------------------------------------
+def test_shared_rauc_key():
+    """An image trusts the certificate it was built with, so the signing pair
+    has to survive a build instead of being generated per board and per run."""
+    if which("openssl") is None:
+        check(True, "openssl is not installed, the shared key test is skipped")
+        return
+
+    tmp = tempfile.mkdtemp(prefix="iptv-rauckey-")
+    keydir = os.path.join(tmp, "keys")
+    env = dict(os.environ)
+    env["IPTVPI_RAUC_KEYDIR"] = keydir
+    for name in ("IPTVPI_RAUC_CERT", "IPTVPI_RAUC_KEY", "IPTVPI_ROOT_PASSWORD"):
+        env.pop(name, None)
+
+    def post_build(tag, extra_env=None):
+        binaries = os.path.join(tmp, tag, "binaries")
+        target = os.path.join(tmp, tag, "target")
+        os.makedirs(binaries)
+        os.makedirs(target)
+        run_env = dict(env)
+        run_env["BINARIES_DIR"] = binaries
+        run_env.update(extra_env or {})
+        rc, out, err = run(["bash", os.path.join(BOARD, "post-build.sh"), target],
+                           env=run_env)
+        return rc, out, err, binaries, target
+
+    rc, out, err, binaries1, target1 = post_build("first")
+    check(rc == 0, "post-build.sh runs against an empty tree (%s)" % err.strip()[-300:])
+    key1 = os.path.join(keydir, "ca.key.pem")
+    cert1 = os.path.join(keydir, "ca.cert.pem")
+    check(os.path.isfile(key1), "a signing key is created in the shared directory")
+    check(os.path.isfile(cert1), "the certificate is created next to it")
+    mode = os.stat(key1).st_mode & 0o777
+    check(mode == 0o600, "the shared private key is mode 0600, got %s" % oct(mode))
+    shared = read(cert1)
+    check(read(os.path.join(binaries1, "rauc/ca.cert.pem")) == shared,
+          "the certificate is staged for post-image.sh")
+    check(read(os.path.join(target1, "etc/rauc/ca.cert.pem")) == shared,
+          "the image carries the shared certificate")
+    check("RAUC signing certificate (SHA-256)" in out,
+          "the certificate fingerprint is logged")
+
+    rc, out, err, binaries2, _target2 = post_build("second")
+    check(rc == 0, "a second build succeeds (%s)" % err.strip()[-300:])
+    check("reusing the RAUC signing key" in out,
+          "the second build reports that the key was reused")
+    check(read(cert1) == shared, "the shared certificate is not regenerated")
+    check(read(os.path.join(binaries2, "rauc/ca.cert.pem")) == shared,
+          "the second build signs with the same certificate")
+
+    # An explicit pair (a production key) still wins over the shared directory.
+    explicit_cert = os.path.join(tmp, "explicit", "c.pem")
+    explicit_key = os.path.join(tmp, "explicit", "k.pem")
+    os.makedirs(os.path.dirname(explicit_cert))
+    rc, _out, err = run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                         "-days", "1", "-subj", "/CN=IPTV-Pi production test",
+                         "-keyout", explicit_key, "-out", explicit_cert], env=env)
+    check(rc == 0, "a test key pair can be generated (%s)" % err.strip()[-200:])
+    rc, _out, err, _binaries3, target3 = post_build(
+        "third", {"IPTVPI_RAUC_CERT": explicit_cert, "IPTVPI_RAUC_KEY": explicit_key})
+    check(rc == 0, "post-build accepts an explicit key pair (%s)" % err.strip()[-300:])
+    check(read(os.path.join(target3, "etc/rauc/ca.cert.pem")) == read(explicit_cert),
+          "IPTVPI_RAUC_CERT overrides the shared development key")
+    check(read(cert1) == shared,
+          "an explicit pair does not overwrite the shared key")
+
+    shutil.rmtree(tmp)
+
+
+# --------------------------------------------------------------------------
 # 4. iptv-rauc-mark-good (the read-write window around rauc)
 # --------------------------------------------------------------------------
 def test_mark_good():
@@ -649,6 +721,16 @@ def test_static():
     check('iptv-data-init.service"' in post_build, "post-build enables the data unit")
     check('iptv-rauc-mark-good.service"' in post_build, "post-build enables the mark-good unit")
     check("openssl req -x509" in post_build, "post-build can generate a signing key")
+    check("IPTVPI_RAUC_KEYDIR" in post_build,
+          "post-build signs with a key from a shared directory")
+    check("/.cache/iptvpi-rauc" in post_build,
+          "the shared key directory has a documented default")
+    check("reusing the RAUC signing key" in post_build,
+          "an existing key is reused instead of being regenerated")
+    check("adopting the RAUC signing key already in" in post_build,
+          "a pair in the build tree is adopted instead of replaced")
+    check("-fingerprint -sha256" in post_build,
+          "the certificate fingerprint is logged so a rotation is visible")
     check("${TARGET_DIR}/etc/rauc/ca.cert.pem" in post_build, "the certificate reaches the image")
     check('install -m 0600' in post_build or 'chmod 0600' in post_build,
           "the private key is kept private")
@@ -693,6 +775,7 @@ def test_static():
 def main():
     test_boot_slot()
     test_data_init()
+    test_shared_rauc_key()
     test_post_image()
     test_mark_good()
     test_static()

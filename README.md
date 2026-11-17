@@ -340,15 +340,28 @@ edit `cmdline.txt` on the FAT partition back to
 `root=PARTUUID=49505456-02 rauc.slot=A` (or `-03`/`B` for the other slot) —
 that file is the whole bootloader state, next to `/boot/rauc/` on the box.
 
-**Signing keys.** `post-build.sh` generates a development key pair on first
-build (`binaries/rauc/ca.cert.pem`, `ca.key.pem`, RSA 4096, 10 years) and
-installs only the certificate into the image. That key is fine for testing and
-worthless for production, because anyone with the repository can sign a bundle
-the box will accept. For a real deployment pass your own pair with
-`IPTVPI_RAUC_CERT` and `IPTVPI_RAUC_KEY` (or drop them into
-`output/piX/images/rauc/` before the build) and keep the private key off the
-build machine; the image always carries the certificate it was built with, so
-replacing the key means rebuilding and reflashing once. Bundles use
+**Signing keys.** An image trusts exactly the certificate it was built with, so
+the pair has to survive the build: `post-build.sh` reuses one key instead of
+generating a new one per board and per run. It resolves it in this order —
+`IPTVPI_RAUC_CERT`/`IPTVPI_RAUC_KEY` when both are set, otherwise
+`IPTVPI_RAUC_KEYDIR` (default `~/.cache/iptvpi-rauc`, created on first use,
+RSA 4096, 10 years), otherwise a pair already staged in `binaries/rauc`, which
+is then adopted into that directory. Only the certificate reaches the image
+(`/etc/rauc/ca.cert.pem`); the private key stays outside `output/`, so `--clean`
+and a fresh output directory do not rotate it. That is what makes an update from
+a later release installable on a box that is already flashed — a per-build key
+would be rejected by every existing box. Every build prints the certificate's
+SHA-256, so a rotation shows up in the log instead of only when a box refuses an
+update.
+
+The development key is fine for testing and worthless for production: whoever
+can read that directory can sign a bundle the box accepts. For a real deployment
+pass your own pair with `IPTVPI_RAUC_CERT` and `IPTVPI_RAUC_KEY` and keep the
+private key off the build machine. Replacing the key means rebuilding and
+reflashing once, because the image carries the certificate it was built with.
+In CI the pair lives in the Actions cache (`iptvpi-rauc-key-v1`) and is handed to
+both matrix jobs as an artifact, so the pi1 and pi2 bundles of one release — and
+of every later release — are signed with the same certificate. Bundles use
 `format=plain`: no host-side `veritysetup` is needed, the bundle signature and
 its hashes still cover every byte after installation.
 
@@ -1185,6 +1198,7 @@ with a precise message rather than producing a broken image.
 |---|---|---|
 | `verify` | every push and pull request | Python 3.11: compiles the sources, `node --check` on the inline JavaScript, then both suites |
 | `verify-py27` | every push and pull request | the same two suites in a real `python:2.7-slim` container with Flask 1.1.4 — the image runs Kodi 18, which brings Python 2.7, so `webui/app.py` is proven there instead of merely declared compatible |
+| `rauc-key` | `workflow_dispatch` or a `v*` tag | restores the shared RAUC signing pair from the Actions cache (creating it once), prints its fingerprint and hands it to both build jobs, so every image and every release is signed with the same certificate |
 | `build-images` | `workflow_dispatch` or a `v*` tag | matrix over `pi1`/`pi2`: frees runner disk, restores the `dl/` cache, runs `./build_os.sh <board>` and uploads `sdcard.img`, `iptvpi-*.raucb` and `iptvpi-*.raucb.sha256` as artifacts |
 
 The download cache is keyed on the defconfigs, so a rebuild reuses the

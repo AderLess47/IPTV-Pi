@@ -62,9 +62,54 @@ jobs:
         # reproduces exactly what happens here.
         run: sh tests/run-py27.sh
 
+  rauc-key:
+    # Every image trusts exactly the certificate it was built with, so all
+    # builds have to sign with the same key: a key generated per build would
+    # make a bundle from a newer release impossible to install on an already
+    # flashed box. The runner is disposable, so the pair lives in the Actions
+    # cache and is handed to both matrix jobs through an artifact.
+    name: RAUC signing key
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Restore the shared signing key
+        uses: actions/cache@v4
+        with:
+          path: rauc-keys
+          key: iptvpi-rauc-key-v1
+
+      - name: Create the key when there is none yet
+        run: |
+          set -e
+          install -d -m 0700 rauc-keys
+          if [ ! -f rauc-keys/ca.cert.pem ] || [ ! -f rauc-keys/ca.key.pem ]; then
+            # Losing the cached key means every box flashed with an earlier
+            # release stops accepting new bundles; the warning is deliberate.
+            echo "::warning::no cached RAUC key - generating a new development key; bundles from earlier releases will not install any more"
+            openssl req -x509 -newkey rsa:4096 -nodes -days 3650 \
+              -subj "/CN=IPTV-Pi development signing key" \
+              -keyout rauc-keys/ca.key.pem -out rauc-keys/ca.cert.pem
+            chmod 0600 rauc-keys/ca.key.pem
+          fi
+          openssl x509 -in rauc-keys/ca.cert.pem -noout -fingerprint -sha256
+
+      - name: Hand the key to the build jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: rauc-key
+          path: rauc-keys/
+          if-no-files-found: error
+          retention-days: 1
+
   build-images:
     name: build image (${{ matrix.board }})
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: rauc-key
+    env:
+      # post-build.sh signs with exactly this pair, so both boards of this run
+      # and every later release share one certificate.
+      IPTVPI_RAUC_CERT: ${{ github.workspace }}/rauc-keys/ca.cert.pem
+      IPTVPI_RAUC_KEY: ${{ github.workspace }}/rauc-keys/ca.key.pem
     # Buildroot 2021.02 ships Python 2.7.18 for its host tools, and that Python
     # cannot build its ssl module against OpenSSL 3 - on the 22.04 runner the
     # resulting setuptools build aborts with SIGABRT. The job therefore runs in
@@ -81,6 +126,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Fetch the shared signing key
+        uses: actions/download-artifact@v4
+        with:
+          name: rauc-key
+          path: rauc-keys
 
       - name: Point apt at the Debian archive
         # bullseye is past its LTS window, so deb.debian.org no longer serves
@@ -137,6 +188,14 @@ jobs:
 
       - name: Build the ${{ matrix.board }} image
         run: ./build_os.sh ${{ matrix.board }}
+      - name: Check the image trusts the shared signing key
+        # A silent key change would only show up when a box refuses an update.
+        run: |
+          set -e
+          built="output/${{ matrix.board }}/images/rauc/ca.cert.pem"
+          cmp rauc-keys/ca.cert.pem "$built"
+          openssl x509 -in "$built" -noout -fingerprint -sha256
+
       - name: Collect sdcard.img, bundle and checksum
         run: |
           set -e

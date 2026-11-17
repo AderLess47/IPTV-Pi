@@ -56,6 +56,12 @@ Environment:
   BUILDROOT_REPO          Buildroot git repository to clone
   IPTVPI_ROOT_PASSWORD    If set, the image gets this root password (hashed
                           at build time; nothing is stored in the repo)
+  IPTVPI_RAUC_KEYDIR      Directory holding the shared RAUC signing pair
+                          (default: ~/.cache/iptvpi-rauc). Every build reuses
+                          the same key, so an update from a later release stays
+                          installable on an already flashed box.
+  IPTVPI_RAUC_CERT        Explicit signing certificate (wins over the keydir)
+  IPTVPI_RAUC_KEY         Explicit private key; set it together with the cert
   BR2_DL_DIR              Download cache (default: ./dl)
 
 Output:
@@ -63,7 +69,8 @@ Output:
   output/<board>/images/iptvpi-<version>.raucb
   output/<board>/images/iptvpi-<version>.raucb.sha256
                                       signed A/B update bundle (`rauc install`)
-  output/<board>/images/rauc/         signing key pair (keep the .key.pem safe)
+  output/<board>/images/rauc/         the signing pair this build used, copied
+                                      from IPTVPI_RAUC_KEYDIR (keep it safe)
 
 Notes:
   IPTV-Pi needs Buildroot 2021.02.x: that is the last series whose Kodi
@@ -334,6 +341,10 @@ build_board() {
     else
         log "no update bundle was created (host rauc or signing key missing)"
     fi
+
+    # The same key has to survive every build, otherwise the bundle of a later
+    # release cannot be installed on a box that was flashed with this image.
+    log "RAUC signing key: ${IPTVPI_RAUC_KEYDIR:-${HOME:-/root}/.cache/iptvpi-rauc}/ca.key.pem (keep it safe)"
 }
 
 if [ "${DO_MENUCONFIG}" -eq 1 ]; then

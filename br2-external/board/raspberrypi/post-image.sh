@@ -219,6 +219,9 @@ log "SD card image ready: ${BINARIES_DIR}/sdcard.img"
 # --------------------------------------------------------------------------
 # RAUC bundle for A/B system updates
 # --------------------------------------------------------------------------
+# post-build.sh resolves the signing pair (IPTVPI_RAUC_CERT/IPTVPI_RAUC_KEY,
+# else IPTVPI_RAUC_KEYDIR) and stages it in binaries/rauc, so every build - both
+# boards and every release - signs with the same certificate.
 RAUC_BIN="${HOST_DIR:-/usr}/bin/rauc"
 RAUC_CERT="${BINARIES_DIR}/rauc/ca.cert.pem"
 RAUC_KEY="${BINARIES_DIR}/rauc/ca.key.pem"
