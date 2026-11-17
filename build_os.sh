@@ -248,15 +248,29 @@ build_board() {
             O="${out}" \
             BR2_EXTERNAL="${EXTERNAL_DIR}" \
             BR2_DL_DIR="${DL_DIR}" \
-            host-python host-python-setuptools \
+            host-python \
             -j"${JOBS}"
         local hostpy="${out}/host/bin/python2"
         if ! "${hostpy}" -V; then
             warn "${hostpy} does not start; collecting details"
+            file "${hostpy}" || true
             ldd "${hostpy}" || true
             PYTHONVERBOSE=1 "${hostpy}" -V || true
+            if command -v gdb >/dev/null 2>&1; then
+                gdb -batch -ex run -ex bt --args "${hostpy}" -V || true
+            else
+                warn "install gdb for a backtrace"
+            fi
             die "Buildroot's host python does not run on this host"
         fi
+        "${hostpy}" -c 'import sys; print("host python %s" % sys.version.split()[0])'
+        log "building host-python-setuptools (smoke test)"
+        make -C "${BUILDROOT_DIR}" \
+            O="${out}" \
+            BR2_EXTERNAL="${EXTERNAL_DIR}" \
+            BR2_DL_DIR="${DL_DIR}" \
+            host-python-setuptools \
+            -j"${JOBS}"
         "${hostpy}" -c 'import setuptools, sys; print("setuptools %s on Python %s" % (setuptools.__version__, sys.version.split()[0]))'
         log "host python smoke test passed: ${hostpy}"
         return 0

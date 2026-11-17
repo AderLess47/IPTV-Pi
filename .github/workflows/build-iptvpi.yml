@@ -103,7 +103,7 @@ jobs:
           # it is NOT pulled in, which is exactly what failed twice.
           sudo apt-get install -y --no-install-recommends \
             build-essential bison flex libncurses-dev libssl-dev \
-            gettext autopoint autoconf automake libtool pkg-config gperf \
+            gettext autopoint autoconf automake libtool pkg-config gperf gdb \
             bc bzip2 cpio file git patch perl rsync sed tar unzip wget \
             ca-certificates e2fsprogs dosfstools mtools python3
 
