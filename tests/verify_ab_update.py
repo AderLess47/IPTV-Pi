@@ -554,6 +554,89 @@ def test_board_compatible():
 
 
 # --------------------------------------------------------------------------
+# 4b. the CI build refuses to sign without the shared key
+#
+def workflow_step_script(workflow, step_name):
+    """Return the `run:` block of one workflow step (no YAML parser needed)."""
+    lines = workflow.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if line.strip() == "- name: " + step_name:
+            start = index
+            break
+    if start is None:
+        return None
+    body = []
+    inside = False
+    for line in lines[start + 1:]:
+        if not inside:
+            if line.strip() == "run: |":
+                inside = True
+            continue
+        if line.strip() and not line.startswith("          "):
+            break
+        body.append(line[10:].rstrip())
+    return "\n".join(body) if inside else None
+
+
+def test_ci_key_guard():
+    """The private key is only cached, so a build has to notice when the cache
+    is empty: signing with a key of its own would produce a bundle that every
+    already flashed box rejects, and only a box would show that."""
+    workflow = read(os.path.join(ROOT, ".github/workflows/build-iptvpi.yml"))
+    guard = workflow_step_script(workflow, "Check the shared signing key is usable")
+    check(guard is not None, "the workflow guards the restored RAUC key")
+    check("download-artifact" not in workflow,
+          "the private key is not handed around as a workflow artifact")
+    check(workflow.count("upload-artifact") == 1,
+          "only the image upload uses upload-artifact")
+    check("actions/cache/restore@v4" in workflow,
+          "the build jobs restore the cached pair read-only")
+    if guard is None or which("bash") is None or which("openssl") is None:
+        check(True, "bash/openssl missing, the key guard test is skipped")
+        return
+
+    tmp = tempfile.mkdtemp(prefix="iptv-keyguard-")
+    keys = os.path.join(tmp, "rauc-keys")
+
+    def guard_script(cache_hit):
+        path = os.path.join(tmp, "guard.sh")
+        body = guard.replace("${{ steps.rauc-key.outputs.cache-hit }}", cache_hit)
+        with open(path, "w") as fh:
+            fh.write(body + "\n")
+        return path
+
+    rc, out, err = run(["bash", guard_script("false")], cwd=tmp)
+    check(rc != 0, "an empty key cache fails the build, got %r" % rc)
+    check("::error::" in out, "the failure is reported as an annotation")
+    check("workflow_dispatch" in out and "RAUC signing key" in out,
+          "the message says how to recreate the pair")
+    check("::warning::" in out, "a missed cache hit is warned about")
+
+    os.makedirs(keys)
+    cert = os.path.join(keys, "ca.cert.pem")
+    key = os.path.join(keys, "ca.key.pem")
+    rc, _, err = run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                      "-days", "1", "-subj", "/CN=guard test",
+                      "-keyout", key, "-out", cert], cwd=tmp)
+    check(rc == 0, "a test pair can be created (%s)" % err.strip()[-300:])
+
+    rc, out, err = run(["bash", guard_script("true")], cwd=tmp)
+    check(rc == 0, "a matching pair passes the guard (%s)" % err.strip()[-300:])
+    check("Fingerprint" in out, "the guard prints the certificate fingerprint")
+    check("::warning::" not in out, "a cache hit is not warned about")
+
+    other = os.path.join(tmp, "other.key")
+    run(["openssl", "genrsa", "-out", other, "2048"], cwd=tmp)
+    shutil.copyfile(other, key)
+    rc, out, _ = run(["bash", guard_script("true")], cwd=tmp)
+    check(rc != 0, "a key that does not belong to the certificate is refused")
+    check("do not belong together" in out, "the mismatch is named")
+
+    shutil.rmtree(tmp)
+
+
+# --------------------------------------------------------------------------
 # 5. iptv-rauc-mark-good (the read-write window around rauc)
 # --------------------------------------------------------------------------
 def test_mark_good():
@@ -827,6 +910,7 @@ def main():
     test_data_init()
     test_shared_rauc_key()
     test_board_compatible()
+    test_ci_key_guard()
     test_post_image()
     test_mark_good()
     test_static()

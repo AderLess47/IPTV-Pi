@@ -67,7 +67,8 @@ jobs:
     # builds have to sign with the same key: a key generated per build would
     # make a bundle from a newer release impossible to install on an already
     # flashed box. The runner is disposable, so the pair lives in the Actions
-    # cache and is handed to both matrix jobs through an artifact.
+    # cache and only there: the build jobs restore the same cache entry
+    # themselves, so the private key never travels as a downloadable artifact.
     name: RAUC signing key
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
@@ -93,13 +94,14 @@ jobs:
           fi
           openssl x509 -in rauc-keys/ca.cert.pem -noout -fingerprint -sha256
 
-      - name: Hand the key to the build jobs
-        uses: actions/upload-artifact@v4
-        with:
-          name: rauc-key
-          path: rauc-keys/
-          if-no-files-found: error
-          retention-days: 1
+      # No artifact: the cache saved by this job is the only way the pair
+      # reaches the build jobs. Check the write worked before they start.
+      - name: Make sure the pair is in the cache
+        run: |
+          set -e
+          test -s rauc-keys/ca.cert.pem
+          test -s rauc-keys/ca.key.pem
+          echo "the pair is cached as iptvpi-rauc-key-v1 once this job finishes"
 
   build-images:
     name: build image (${{ matrix.board }})
@@ -127,11 +129,34 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Fetch the shared signing key
-        uses: actions/download-artifact@v4
+      - name: Restore the shared signing key
+        # Read-only: only the rauc-key job may write this cache entry, so a
+        # build can never replace the shared pair with one of its own.
+        id: rauc-key
+        uses: actions/cache/restore@v4
         with:
-          name: rauc-key
           path: rauc-keys
+          key: iptvpi-rauc-key-v1
+
+      - name: Check the shared signing key is usable
+        # Building with a missing or mismatched pair would produce a bundle
+        # that no flashed box accepts, and only on a box would that show.
+        run: |
+          set -e
+          if [ "${{ steps.rauc-key.outputs.cache-hit }}" != "true" ]; then
+            echo "::warning::the shared RAUC key was not restored from the Actions cache"
+          fi
+          if [ ! -s rauc-keys/ca.cert.pem ] || [ ! -s rauc-keys/ca.key.pem ]; then
+            echo "::error::rauc-keys/ is empty - the shared RAUC signing key did not survive the cache. Re-run the 'RAUC signing key' job (workflow_dispatch) so it recreates and caches the pair, then start the build again. Building this job would sign a bundle that every already flashed box rejects."
+            exit 1
+          fi
+          cert_pub="$(openssl x509 -in rauc-keys/ca.cert.pem -noout -pubkey)"
+          key_pub="$(openssl pkey -in rauc-keys/ca.key.pem -pubout)"
+          if [ "$cert_pub" != "$key_pub" ]; then
+            echo "::error::rauc-keys/ca.cert.pem and rauc-keys/ca.key.pem do not belong together"
+            exit 1
+          fi
+          openssl x509 -in rauc-keys/ca.cert.pem -noout -fingerprint -sha256
 
       - name: Point apt at the Debian archive
         # bullseye is past its LTS window, so deb.debian.org no longer serves
