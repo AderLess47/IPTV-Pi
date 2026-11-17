@@ -169,7 +169,8 @@ fi
     printf '}\n\n'
     printf 'image sdcard.img {\n'
     printf '\thdimage {\n'
-    printf '\t\tpartition-table-type = "dos"\n'
+    # genimage 13 (what Buildroot 2021.02 ships) has no partition-table-type
+    # option: an MBR table is the default and all there is unless gpt = true.
     printf '\t\tdisk-signature = %s\n' "${DISK_SIGNATURE}"
     printf '\t}\n\n'
     printf '\tpartition boot {\n'
