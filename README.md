@@ -362,16 +362,17 @@ can read that directory can sign a bundle the box accepts. For a real deployment
 pass your own pair with `IPTVPI_RAUC_CERT` and `IPTVPI_RAUC_KEY` and keep the
 private key off the build machine. Replacing the key means rebuilding and
 reflashing once, because the image carries the certificate it was built with.
-In CI the pair lives in the Actions cache (`iptvpi-rauc-key-v1`) and both
-matrix jobs restore it from that cache, so the pi1 and pi2 bundles of one
-release — and of every later release — are signed with the same certificate. The
-private key is not handed around as a workflow artifact and is not downloadable
-from a run: the key job is the only writer of that cache entry, the build jobs
-restore it read-only, and a build that finds the cache empty fails with a clear
-message instead of signing with a key of its own. The entry is written on the
-default branch, because GitHub isolates caches per ref: a `v*` tag build can read
-the default branch cache but never the cache of another tag, and it never writes
-one. Bundles use
+In CI the pair lives in the repository secrets `IPTVPI_RAUC_CERT_PEM` and
+`IPTVPI_RAUC_KEY_PEM` (set once under *Settings → Secrets and variables →
+Actions*, e.g. `gh secret set IPTVPI_RAUC_CERT_PEM < ca.cert.pem`). Each build
+writes them into `rauc-keys/` with mode 0600, checks that certificate and key
+belong together, prints the SHA-256 and only then signs, so the pi1 and pi2
+bundles of one release — and of every later release — are signed with the same
+certificate. The private key is not a workflow artifact and cannot be downloaded
+from a run; the build fails with a clear message when a secret is empty instead
+of signing with a key of its own. The Actions cache would not do here: GitHub
+isolates it per ref, so a `v*` tag build never sees the entry another tag wrote.
+Bundles use
 `format=plain`: no host-side `veritysetup` is needed, the bundle signature and
 its hashes still cover every byte after installation.
 
@@ -1208,8 +1209,7 @@ with a precise message rather than producing a broken image.
 |---|---|---|
 | `verify` | every push and pull request | Python 3.11: compiles the sources, `node --check` on the inline JavaScript, then both suites |
 | `verify-py27` | every push and pull request | the same two suites in a real `python:2.7-slim` container with Flask 1.1.4 — the image runs Kodi 18, which brings Python 2.7, so `webui/app.py` is proven there instead of merely declared compatible |
-| `rauc-key` | push to `main` or `workflow_dispatch` | restores the shared RAUC signing pair from the Actions cache (creating it once), prints its fingerprint and leaves it in the default branch cache; both build jobs — including the `v*` tag builds — restore that one entry read-only, so the private key is never a downloadable artifact |
-| `build-images` | `workflow_dispatch` or a `v*` tag | matrix over `pi1`/`pi2`: frees runner disk, restores the `dl/` cache, runs `./build_os.sh <board>` and uploads `sdcard.img`, `iptvpi-*.raucb` and `iptvpi-*.raucb.sha256` as artifacts |
+| `build-images` | `workflow_dispatch` or a `v*` tag | matrix over `pi1`/`pi2`: writes the signing pair from the repository secrets into `rauc-keys/` (mode 0600, pair verified, fingerprint logged) and fails when a secret is empty, frees runner disk, restores the `dl/` cache, runs `./build_os.sh <board>` and uploads `sdcard.img`, `iptvpi-*.raucb` and `iptvpi-*.raucb.sha256` as artifacts |
 
 The download cache is keyed on the defconfigs, so a rebuild reuses the
 Buildroot tarballs and only re-runs what actually changed. `verify` and

@@ -62,63 +62,23 @@ jobs:
         # reproduces exactly what happens here.
         run: sh tests/run-py27.sh
 
-  rauc-key:
+  build-images:
     # Every image trusts exactly the certificate it was built with, so all
     # builds have to sign with the same key: a key generated per build would
     # make a bundle from a newer release impossible to install on an already
-    # flashed box. The runner is disposable, so the pair lives in the Actions
-    # cache and only there: the build jobs restore the same cache entry
-    # themselves, so the private key never travels as a downloadable artifact.
-    name: RAUC signing key
-    # A tag can read the default branch cache but never a cache of another tag,
-    # and a tag build must not mint a key of its own. The pair is therefore
-    # written on the default branch only; every tag build restores it from
-    # there and never writes that entry.
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Restore the shared signing key
-        uses: actions/cache@v4
-        with:
-          path: rauc-keys
-          key: iptvpi-rauc-key-v1
-
-      - name: Create the key when there is none yet
-        run: |
-          set -e
-          install -d -m 0700 rauc-keys
-          if [ ! -f rauc-keys/ca.cert.pem ] || [ ! -f rauc-keys/ca.key.pem ]; then
-            # Losing the cached key means every box flashed with an earlier
-            # release stops accepting new bundles; the warning is deliberate.
-            echo "::warning::no cached RAUC key - generating a new development key; bundles from earlier releases will not install any more"
-            openssl req -x509 -newkey rsa:4096 -nodes -days 3650 \
-              -subj "/CN=IPTV-Pi development signing key" \
-              -keyout rauc-keys/ca.key.pem -out rauc-keys/ca.cert.pem
-            chmod 0600 rauc-keys/ca.key.pem
-          fi
-          openssl x509 -in rauc-keys/ca.cert.pem -noout -fingerprint -sha256
-
-      # No artifact: the cache saved by this job is the only way the pair
-      # reaches the build jobs. Check the write worked before they start.
-      - name: Make sure the pair is in the cache
-        run: |
-          set -e
-          test -s rauc-keys/ca.cert.pem
-          test -s rauc-keys/ca.key.pem
-          echo "the pair is cached as iptvpi-rauc-key-v1 once this job finishes"
-
-  build-images:
+    # flashed box. The pair therefore lives in the repository secrets and is
+    # materialised per job - never as an artifact, which anyone who can read the
+    # run could download. The Actions cache cannot carry it either: caches are
+    # scoped per ref, so a tag build cannot read another tag's entry.
     name: build image (${{ matrix.board }})
-    # always(): a tag build needs no key job of its own, and a skipped
-    # rauc-key job must not take the builds down with it.
-    if: |
-      always() && (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v'))
-    needs: rauc-key
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     env:
       # post-build.sh signs with exactly this pair, so both boards of this run
       # and every later release share one certificate.
       IPTVPI_RAUC_CERT: ${{ github.workspace }}/rauc-keys/ca.cert.pem
       IPTVPI_RAUC_KEY: ${{ github.workspace }}/rauc-keys/ca.key.pem
+      RAUC_CERT_PEM: ${{ secrets.IPTVPI_RAUC_CERT_PEM }}
+      RAUC_KEY_PEM: ${{ secrets.IPTVPI_RAUC_KEY_PEM }}
     # Buildroot 2021.02 ships Python 2.7.18 for its host tools, and that Python
     # cannot build its ssl module against OpenSSL 3 - on the 22.04 runner the
     # resulting setuptools build aborts with SIGABRT. The job therefore runs in
@@ -136,32 +96,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Restore the shared signing key
-        # Read-only: only the rauc-key job on the default branch may write this
-        # cache entry, so a build can never replace the shared pair with one of
-        # its own. A tag build reads the default branch entry.
-        id: rauc-key
-        uses: actions/cache/restore@v4
-        with:
-          path: rauc-keys
-          key: iptvpi-rauc-key-v1
-
-      - name: Check the shared signing key is usable
-        # Building with a missing or mismatched pair would produce a bundle
-        # that no flashed box accepts, and only on a box would that show.
+      - name: Materialise the shared signing key
+        # A missing or mismatched pair would produce a bundle that no flashed
+        # box accepts, and only a box would show that. Fail here instead.
         run: |
           set -e
-          if [ "${{ steps.rauc-key.outputs.cache-hit }}" != "true" ]; then
-            echo "::warning::the shared RAUC key was not restored from the Actions cache"
-          fi
-          if [ ! -s rauc-keys/ca.cert.pem ] || [ ! -s rauc-keys/ca.key.pem ]; then
-            echo "::error::rauc-keys/ is empty - the shared RAUC signing key is not in the default branch cache. Run the 'RAUC signing key' job on main (a push to main, or workflow_dispatch from main) so it recreates and caches the pair, then start this build again. Building now would sign a bundle that every already flashed box rejects."
+          if [ -z "$RAUC_CERT_PEM" ] || [ -z "$RAUC_KEY_PEM" ]; then
+            echo "::error::the repository secrets IPTVPI_RAUC_CERT_PEM and IPTVPI_RAUC_KEY_PEM are empty. Set both under Settings > Secrets and variables > Actions, then run this build again. Signing with a key of its own would produce a bundle that every already flashed box rejects."
             exit 1
           fi
+          install -d -m 0700 rauc-keys
+          printf '%s\n' "$RAUC_CERT_PEM" > rauc-keys/ca.cert.pem
+          printf '%s\n' "$RAUC_KEY_PEM" > rauc-keys/ca.key.pem
+          chmod 0600 rauc-keys/ca.key.pem
           cert_pub="$(openssl x509 -in rauc-keys/ca.cert.pem -noout -pubkey)"
           key_pub="$(openssl pkey -in rauc-keys/ca.key.pem -pubout)"
           if [ "$cert_pub" != "$key_pub" ]; then
-            echo "::error::rauc-keys/ca.cert.pem and rauc-keys/ca.key.pem do not belong together"
+            echo "::error::IPTVPI_RAUC_CERT_PEM and IPTVPI_RAUC_KEY_PEM do not belong together"
             exit 1
           fi
           openssl x509 -in rauc-keys/ca.cert.pem -noout -fingerprint -sha256

@@ -580,46 +580,49 @@ def workflow_step_script(workflow, step_name):
 
 
 def test_ci_key_guard():
-    """The private key is only cached, so a build has to notice when the cache
-    is empty: signing with a key of its own would produce a bundle that every
-    already flashed box rejects, and only a box would show that."""
+    """The private key comes from the repository secrets, so a build has to
+    notice when they are empty or do not belong together: signing with a key of
+    its own would produce a bundle that every already flashed box rejects, and
+    only a box would show that."""
     workflow = read(os.path.join(ROOT, ".github/workflows/build-iptvpi.yml"))
-    guard = workflow_step_script(workflow, "Check the shared signing key is usable")
-    check(guard is not None, "the workflow guards the restored RAUC key")
+    guard = workflow_step_script(workflow, "Materialise the shared signing key")
+    check(guard is not None, "the workflow materialises the shared RAUC key")
     check("download-artifact" not in workflow,
           "the private key is not handed around as a workflow artifact")
     check(workflow.count("upload-artifact") == 1,
           "only the image upload uses upload-artifact")
-    check("actions/cache/restore@v4" in workflow,
-          "the build jobs restore the cached pair read-only")
-    # GitHub isolates caches per ref: a tag reads the default branch cache and
-    # never another tag's, so the pair has to be written on the default branch.
-    key_job = workflow.split("\n  rauc-key:\n", 1)[-1].split("\n  build-images:\n", 1)[0]
-    check("refs/heads/main" in key_job, "the key job caches the pair on the default branch")
-    check("refs/tags" not in key_job, "a tag build never creates a key of its own")
-    build_job = workflow.split("\n  build-images:\n", 1)[-1]
-    check("always()" in build_job.split("runs-on:", 1)[0],
-          "a skipped key job does not take the builds down with it")
+    check("secrets.IPTVPI_RAUC_CERT_PEM" in workflow
+          and "secrets.IPTVPI_RAUC_KEY_PEM" in workflow,
+          "the pair is read from the repository secrets")
+    # Caches are scoped per ref, so a tag build cannot fetch the key that way.
+    check("actions/cache" not in workflow.split("Cache the Buildroot downloads")[0],
+          "the signing key does not travel through the Actions cache")
     if guard is None or which("bash") is None or which("openssl") is None:
         check(True, "bash/openssl missing, the key guard test is skipped")
         return
 
     tmp = tempfile.mkdtemp(prefix="iptv-keyguard-")
     keys = os.path.join(tmp, "rauc-keys")
+    script_path = os.path.join(tmp, "guard.sh")
+    with open(script_path, "w") as fh:
+        fh.write(guard + "\n")
 
-    def guard_script(cache_hit):
-        path = os.path.join(tmp, "guard.sh")
-        body = guard.replace("${{ steps.rauc-key.outputs.cache-hit }}", cache_hit)
-        with open(path, "w") as fh:
-            fh.write(body + "\n")
-        return path
+    def guard_env(cert_pem=None, key_pem=None):
+        env = dict(os.environ)
+        env.pop("RAUC_CERT_PEM", None)
+        env.pop("RAUC_KEY_PEM", None)
+        if cert_pem is not None:
+            env["RAUC_CERT_PEM"] = cert_pem
+        if key_pem is not None:
+            env["RAUC_KEY_PEM"] = key_pem
+        return env
 
-    rc, out, err = run(["bash", guard_script("false")], cwd=tmp)
-    check(rc != 0, "an empty key cache fails the build, got %r" % rc)
+    rc, out, err = run(["bash", script_path], env=guard_env(), cwd=tmp)
+    check(rc != 0, "empty secrets fail the build, got %r" % rc)
     check("::error::" in out, "the failure is reported as an annotation")
-    check("workflow_dispatch" in out and "RAUC signing key" in out,
-          "the message says how to recreate the pair")
-    check("::warning::" in out, "a missed cache hit is warned about")
+    check("IPTVPI_RAUC_CERT_PEM" in out and "IPTVPI_RAUC_KEY_PEM" in out,
+          "the message names both secrets")
+    check("Secrets and variables" in out, "the message says where to set them")
 
     os.makedirs(keys)
     cert = os.path.join(keys, "ca.cert.pem")
@@ -629,15 +632,19 @@ def test_ci_key_guard():
                       "-keyout", key, "-out", cert], cwd=tmp)
     check(rc == 0, "a test pair can be created (%s)" % err.strip()[-300:])
 
-    rc, out, err = run(["bash", guard_script("true")], cwd=tmp)
+    rc, out, err = run(["bash", script_path],
+                       env=guard_env(read(cert), read(key)), cwd=tmp)
     check(rc == 0, "a matching pair passes the guard (%s)" % err.strip()[-300:])
     check("Fingerprint" in out, "the guard prints the certificate fingerprint")
-    check("::warning::" not in out, "a cache hit is not warned about")
+    materialised = os.path.join(keys, "ca.key.pem")
+    check(read(materialised) == read(key), "the keys are written where post-build.sh reads them")
+    mode = os.stat(materialised).st_mode & 0o777
+    check(mode == 0o600, "the materialised private key is mode 0600, got %s" % oct(mode))
 
     other = os.path.join(tmp, "other.key")
     run(["openssl", "genrsa", "-out", other, "2048"], cwd=tmp)
-    shutil.copyfile(other, key)
-    rc, out, _ = run(["bash", guard_script("true")], cwd=tmp)
+    rc, out, _ = run(["bash", script_path],
+                     env=guard_env(read(cert), read(other)), cwd=tmp)
     check(rc != 0, "a key that does not belong to the certificate is refused")
     check("do not belong together" in out, "the mismatch is named")
 
