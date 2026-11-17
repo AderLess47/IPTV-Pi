@@ -89,10 +89,14 @@ if [ ! -f "${BINARIES_DIR}/rootfs.ext4" ]; then
     echo "iptv-pi: ${BINARIES_DIR}/rootfs.ext4 is missing" >&2
     exit 1
 fi
+# Buildroot leaves images/rootfs.ext4 as a symlink to rootfs.ext2, and both
+# stat(1) and `ln -f` act on the link itself rather than on the image: resolve
+# it once here so the size check and the staging step see the real file.
+ROOTFS_IMG="$(readlink -f "${BINARIES_DIR}/rootfs.ext4")"
 
 # The rootfs image has to fit into a slot with room to spare for its own
 # growth, otherwise genimage fails with a much less helpful message.
-ROOTFS_MB=$(( $(stat -c '%s' "${BINARIES_DIR}/rootfs.ext4") / 1048576 ))
+ROOTFS_MB=$(( $(stat -c '%s' "${ROOTFS_IMG}") / 1048576 ))
 SLOT_MB="${ROOTFS_SLOT_SIZE%[Mm]}"
 if [ "${ROOTFS_MB}" -ge "${SLOT_MB}" ]; then
     echo "iptv-pi: rootfs.ext4 is ${ROOTFS_MB} MB but a slot is only ${ROOTFS_SLOT_SIZE}" >&2
@@ -135,9 +139,9 @@ grep -q 'panic=' "${STAGE_DIR}/cmdline.txt" \
 printf ' rauc.slot=A\n' >> "${STAGE_DIR}/cmdline.txt"
 
 # The rootfs image is referenced by genimage through the input path; link
-# instead of copying the file.
-if ! ln -f "${BINARIES_DIR}/rootfs.ext4" "${STAGE_DIR}/rootfs.ext4" 2>/dev/null; then
-    cp -f "${BINARIES_DIR}/rootfs.ext4" "${STAGE_DIR}/rootfs.ext4"
+# instead of copying the file (ROOTFS_IMG is the resolved file, see above).
+if ! ln -f "${ROOTFS_IMG}" "${STAGE_DIR}/rootfs.ext4" 2>/dev/null; then
+    cp -fL "${ROOTFS_IMG}" "${STAGE_DIR}/rootfs.ext4"
 fi
 
 # --------------------------------------------------------------------------

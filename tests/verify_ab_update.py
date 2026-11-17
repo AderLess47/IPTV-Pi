@@ -272,8 +272,11 @@ def test_post_image():
         fh.write(b"dtb-built")
     with open(os.path.join(binaries, "zImage"), "wb") as fh:
         fh.write(b"kernel")
-    with open(os.path.join(binaries, "rootfs.ext4"), "wb") as fh:
+    # Buildroot leaves images/rootfs.ext4 as a symlink to rootfs.ext2
+    # (BR2_TARGET_ROOTFS_EXT2_4); staging has to follow that link.
+    with open(os.path.join(binaries, "rootfs.ext2"), "wb") as fh:
         fh.truncate(4 * 1024 * 1024)
+    os.symlink("rootfs.ext2", os.path.join(binaries, "rootfs.ext4"))
     with open(os.path.join(binaries, "rauc/ca.cert.pem"), "w") as fh:
         fh.write("cert\n")
     with open(os.path.join(binaries, "rauc/ca.key.pem"), "w") as fh:
@@ -281,13 +284,15 @@ def test_post_image():
 
     log = os.path.join(tmp, "calls.log")
     # The genimage stub rejects what the real genimage 13 rejects: a --tmppath
-    # that already holds files, and a tmppath that doubles as the rootpath.
+    # that already holds files, a tmppath that doubles as the rootpath, and an
+    # image named in the config that is not readable below the input path.
     genimage_stub = (
-        'tmppath=""\nrootpath=""\nprev=""\n'
+        'tmppath=""\nrootpath=""\ninputpath=""\nprev=""\n'
         'for a in "$@"; do\n'
         '  case "$prev" in\n'
         '    --tmppath) tmppath="$a" ;;\n'
         '    --rootpath) rootpath="$a" ;;\n'
+        '    --inputpath) inputpath="$a" ;;\n'
         '  esac\n'
         '  prev="$a"\n'
         'done\n'
@@ -300,6 +305,12 @@ def test_post_image():
         '  echo "genimage stub: tmppath $tmppath exists and is not empty" >&2\n'
         '  exit 1\n'
         'fi\n'
+        'for img in rootfs.ext4 data.ext4; do\n'
+        '  [ -e "$inputpath/$img" ] && continue\n'
+        '  echo "genimage stub: file($img): stat($inputpath/$img) failed: " \\\n'
+        '       "No such file or directory" >&2\n'
+        '  exit 1\n'
+        'done\n'
         'printf "genimage %s\\n" "$*" >> "' + log + '"\n'
     )
     stubs = {
