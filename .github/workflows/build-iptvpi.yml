@@ -82,11 +82,21 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Point apt at the Debian archive
+        # bullseye is past its LTS window, so deb.debian.org no longer serves
+        # its security updates; the archive still does.
+        run: |
+          cat > /etc/apt/sources.list <<'EOF'
+          deb http://archive.debian.org/debian bullseye main
+          deb http://archive.debian.org/debian-security bullseye-security main
+          EOF
+          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99archive
+          apt-get update
+
       - name: Install host build dependencies
         # The job runs inside the container, so there is no sudo and no runner
         # toolchain to remove: the image is the build host.
         run: |
-          apt-get update
           # kodi's configure step runs ./autogen.sh (and its bundled cpluff
           # does too) once the patches touch the build files, so the autotools
           # have to be on the host. autopoint is its own package since Ubuntu
