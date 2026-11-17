@@ -270,16 +270,25 @@ build_board() {
         for probe in 'import sys' 'import distutils' 'import sysconfig' \
                      'import zlib' 'import hashlib' 'import ssl' 'import ctypes' \
                      'import sqlite3' 'import ctypes.util'; do
-            if "${hostpy}" -c "${probe}" >/dev/null 2>&1; then
+            local probe_rc=0
+            "${hostpy}" -c "${probe}" >/dev/null 2>&1 || probe_rc=$?
+            if [ "${probe_rc}" -eq 0 ]; then
                 log "host python ok: ${probe}"
                 continue
             fi
-            warn "host python probe failed: ${probe}"
-            ldd "${hostpy}" || true
-            if command -v gdb >/dev/null 2>&1; then
-                gdb -batch -ex run -ex bt --args "${hostpy}" -c "${probe}" || true
+            if [ "${probe_rc}" -gt 128 ]; then
+                # 134 = SIGABRT. This is the failure that killed the build: the
+                # module is there but the interpreter dies loading it.
+                warn "host python crashed (rc=${probe_rc}): ${probe}"
+                ldd "${hostpy}" || true
+                if command -v gdb >/dev/null 2>&1; then
+                    gdb -batch -ex run -ex bt --args "${hostpy}" -c "${probe}" || true
+                fi
+                die "Buildroot's host python crashes on this host (${probe})"
             fi
-            die "Buildroot's host python is broken on this host (${probe})"
+            # Buildroot's host python is built without OpenSSL, so ssl raises
+            # ImportError; setuptools copes with that. Only a crash is fatal.
+            warn "host python module unavailable (rc=${probe_rc}): ${probe}"
         done
         log "building host-python-setuptools (smoke test)"
         make -C "${BUILDROOT_DIR}" \
@@ -289,7 +298,8 @@ build_board() {
             host-python-setuptools \
             -j"${JOBS}"
         "${hostpy}" -c 'import setuptools, sys; print("setuptools %s on Python %s" % (setuptools.__version__, sys.version.split()[0]))' || {
-            warn "importing setuptools aborts; backtrace follows"
+            local rc=$?
+            warn "importing setuptools failed (rc=${rc}); backtrace follows"
             if command -v gdb >/dev/null 2>&1; then
                 gdb -batch -ex run -ex bt --args "${hostpy}" -c 'import setuptools' || true
             fi
