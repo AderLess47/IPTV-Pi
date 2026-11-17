@@ -280,8 +280,30 @@ def test_post_image():
         fh.write("key\n")
 
     log = os.path.join(tmp, "calls.log")
+    # The genimage stub rejects what the real genimage 13 rejects: a --tmppath
+    # that already holds files, and a tmppath that doubles as the rootpath.
+    genimage_stub = (
+        'tmppath=""\nrootpath=""\nprev=""\n'
+        'for a in "$@"; do\n'
+        '  case "$prev" in\n'
+        '    --tmppath) tmppath="$a" ;;\n'
+        '    --rootpath) rootpath="$a" ;;\n'
+        '  esac\n'
+        '  prev="$a"\n'
+        'done\n'
+        'if [ -n "$tmppath" ] && [ "$tmppath" = "$rootpath" ]; then\n'
+        '  echo "genimage stub: tmppath and rootpath are the same directory" >&2\n'
+        '  exit 1\n'
+        'fi\n'
+        'if [ -n "$tmppath" ] && [ -d "$tmppath" ] \\\n'
+        '   && [ -n "$(ls -A "$tmppath")" ]; then\n'
+        '  echo "genimage stub: tmppath $tmppath exists and is not empty" >&2\n'
+        '  exit 1\n'
+        'fi\n'
+        'printf "genimage %s\\n" "$*" >> "' + log + '"\n'
+    )
     stubs = {
-        "genimage": 'printf "genimage %s\\n" "$*" >> "' + log + '"\n',
+        "genimage": genimage_stub,
         "mke2fs": 'printf "mke2fs %s\\n" "$*" >> "' + log + '"\n',
         "rauc": ('printf "rauc %s\\n" "$*" >> "' + log + '"\n'
                  'out="${!#}"\n: > "$out"\n'),
@@ -310,6 +332,8 @@ def test_post_image():
     genimage_cfg = os.path.join(stage, "genimage.cfg")
     check(os.path.isfile(genimage_cfg), "a genimage config is generated")
     cfg = read(genimage_cfg)
+    check("partition-table-type" not in cfg,
+          "the config leaves out options genimage 13 does not know")
     check("disk-signature = 0x49505456" in cfg, "the disk signature is pinned")
     for part in ("boot", "rootfs_a", "rootfs_b", "data"):
         check("partition %s {" % part in cfg, "genimage has the %s partition" % part)

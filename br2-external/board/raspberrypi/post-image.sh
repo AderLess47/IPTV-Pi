@@ -29,6 +29,10 @@ FIRMWARE_DIR="${BINARIES_DIR}/rpi-firmware"
 BUILD_TMP="${BUILD_DIR:-${BINARIES_DIR}}"
 STAGE_DIR="${BUILD_TMP}/iptvpi-boot"
 GENIMAGE_TMP="${BUILD_TMP}/genimage.tmp"
+# genimage copies --rootpath into <tmppath>/root and refuses to start when the
+# tmppath it is given already holds anything, so the two must be separate
+# directories and only the root one may be created by us.
+GENIMAGE_ROOT="${BUILD_TMP}/genimage.root"
 GENIMAGE_CFG="${STAGE_DIR}/genimage.cfg"
 
 BOOT_PART_SIZE="${IPTVPI_BOOT_SIZE:-64M}"
@@ -195,12 +199,12 @@ fi
     printf '}\n'
 } > "${GENIMAGE_CFG}"
 
-rm -rf "${GENIMAGE_TMP}"
-mkdir -p "${GENIMAGE_TMP}/root"
+rm -rf "${GENIMAGE_TMP}" "${GENIMAGE_ROOT}"
+mkdir -p "${GENIMAGE_ROOT}"
 
 log "running genimage"
 genimage \
-    --rootpath "${GENIMAGE_TMP}/root" \
+    --rootpath "${GENIMAGE_ROOT}" \
     --tmppath "${GENIMAGE_TMP}" \
     --inputpath "${STAGE_DIR}" \
     --outputpath "${BINARIES_DIR}" \
