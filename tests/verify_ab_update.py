@@ -592,6 +592,14 @@ def test_ci_key_guard():
           "only the image upload uses upload-artifact")
     check("actions/cache/restore@v4" in workflow,
           "the build jobs restore the cached pair read-only")
+    # GitHub isolates caches per ref: a tag reads the default branch cache and
+    # never another tag's, so the pair has to be written on the default branch.
+    key_job = workflow.split("\n  rauc-key:\n", 1)[-1].split("\n  build-images:\n", 1)[0]
+    check("refs/heads/main" in key_job, "the key job caches the pair on the default branch")
+    check("refs/tags" not in key_job, "a tag build never creates a key of its own")
+    build_job = workflow.split("\n  build-images:\n", 1)[-1]
+    check("always()" in build_job.split("runs-on:", 1)[0],
+          "a skipped key job does not take the builds down with it")
     if guard is None or which("bash") is None or which("openssl") is None:
         check(True, "bash/openssl missing, the key guard test is skipped")
         return

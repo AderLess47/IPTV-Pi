@@ -70,7 +70,11 @@ jobs:
     # cache and only there: the build jobs restore the same cache entry
     # themselves, so the private key never travels as a downloadable artifact.
     name: RAUC signing key
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    # A tag can read the default branch cache but never a cache of another tag,
+    # and a tag build must not mint a key of its own. The pair is therefore
+    # written on the default branch only; every tag build restores it from
+    # there and never writes that entry.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-22.04
     steps:
       - name: Restore the shared signing key
@@ -105,7 +109,10 @@ jobs:
 
   build-images:
     name: build image (${{ matrix.board }})
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    # always(): a tag build needs no key job of its own, and a skipped
+    # rauc-key job must not take the builds down with it.
+    if: |
+      always() && (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v'))
     needs: rauc-key
     env:
       # post-build.sh signs with exactly this pair, so both boards of this run
@@ -130,8 +137,9 @@ jobs:
           persist-credentials: false
 
       - name: Restore the shared signing key
-        # Read-only: only the rauc-key job may write this cache entry, so a
-        # build can never replace the shared pair with one of its own.
+        # Read-only: only the rauc-key job on the default branch may write this
+        # cache entry, so a build can never replace the shared pair with one of
+        # its own. A tag build reads the default branch entry.
         id: rauc-key
         uses: actions/cache/restore@v4
         with:
@@ -147,7 +155,7 @@ jobs:
             echo "::warning::the shared RAUC key was not restored from the Actions cache"
           fi
           if [ ! -s rauc-keys/ca.cert.pem ] || [ ! -s rauc-keys/ca.key.pem ]; then
-            echo "::error::rauc-keys/ is empty - the shared RAUC signing key did not survive the cache. Re-run the 'RAUC signing key' job (workflow_dispatch) so it recreates and caches the pair, then start the build again. Building this job would sign a bundle that every already flashed box rejects."
+            echo "::error::rauc-keys/ is empty - the shared RAUC signing key is not in the default branch cache. Run the 'RAUC signing key' job on main (a push to main, or workflow_dispatch from main) so it recreates and caches the pair, then start this build again. Building now would sign a bundle that every already flashed box rejects."
             exit 1
           fi
           cert_pub="$(openssl x509 -in rauc-keys/ca.cert.pem -noout -pubkey)"
