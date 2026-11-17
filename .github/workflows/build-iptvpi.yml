@@ -96,14 +96,28 @@ jobs:
       - name: Install host build dependencies
         run: |
           sudo apt-get update
-          # autopoint/autoconf/automake/libtool: kodi's configure step runs
-          # ./autogen.sh after the patches touch its build files, and that
-          # needs the autotools on the host (autopoint comes from gettext).
+          # kodi's configure step runs ./autogen.sh (and its bundled cpluff
+          # does too) once the patches touch the build files, so the autotools
+          # have to be on the host. autopoint is its own package since Ubuntu
+          # 12.04 and gettext only suggests it - with --no-install-recommends
+          # it is NOT pulled in, which is exactly what failed twice.
           sudo apt-get install -y --no-install-recommends \
             build-essential bison flex libncurses-dev libssl-dev \
-            gettext autoconf automake libtool pkg-config gperf \
+            gettext autopoint autoconf automake libtool pkg-config gperf \
             bc bzip2 cpio file git patch perl rsync sed tar unzip wget \
             ca-certificates e2fsprogs dosfstools mtools python3
+
+      - name: Check the host tools the autotools need
+        run: |
+          # Fail in seconds instead of 40 minutes into the kodi build.
+          for tool in autopoint aclocal autoconf automake libtoolize \
+                      pkg-config gperf msgfmt; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              echo "missing host tool: $tool" >&2
+              exit 1
+            fi
+          done
+          echo "all autotools present"
 
       - name: Cache the Buildroot downloads
         uses: actions/cache@v4
